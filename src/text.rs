@@ -18,7 +18,7 @@
 use bni_rs::ast::{Field, Item, Section, ValueKind};
 use parser_rs::{ParseError, Rawcode, Span};
 
-use crate::{FieldNames, Kind, Mod, Object, ObjectData, Set, Value};
+use crate::{Kind, Metadata, Mod, Object, ObjectData, Set, Value};
 
 impl Kind {
     /// What the file holds, in words.
@@ -65,7 +65,7 @@ pub fn id_text(code: Rawcode) -> String {
 
 /// The key of a field: its id, then `[level]` and `.column` when not 0
 /// (`Hbz1[3].B`).
-fn key_text(m: &Mod) -> String {
+pub(crate) fn key_text(m: &Mod) -> String {
     let mut out = id_text(m.field);
     if m.level != 0 {
         out += &format!("[{}]", m.level);
@@ -78,7 +78,7 @@ fn key_text(m: &Mod) -> String {
     out
 }
 
-fn real_text(v: f32) -> String {
+pub(crate) fn real_text(v: f32) -> String {
     let text = format!("{v:?}");
     if text
         .parse::<f32>()
@@ -127,7 +127,7 @@ pub fn string_text(s: &str) -> String {
     out
 }
 
-fn value_text(value: &Value) -> String {
+pub(crate) fn value_text(value: &Value) -> String {
     match value {
         Value::Int(v) => v.to_string(),
         Value::Real(v) => {
@@ -146,13 +146,14 @@ fn value_text(value: &Value) -> String {
 impl ObjectData {
     /// The text form. [`from_text`] reads it back into the same data.
     pub fn to_text(&self) -> String {
-        self.to_text_named(&FieldNames::default())
+        self.to_text_named(&Metadata::default())
     }
 
-    /// [`to_text`](Self::to_text), with each field's name from `names` as
-    /// a comment after it: `uhpm=500 // Hit Points Maximum (Base)`.
-    /// Comments are only for reading; [`from_text`] skips them.
-    pub fn to_text_named(&self, names: &FieldNames) -> String {
+    /// [`to_text`](Self::to_text), with each field's name and type from
+    /// `meta` as a comment after it:
+    /// `uhpm=500 // Hit Points Maximum (Base): int`. Comments are only for
+    /// reading; [`from_text`] skips them.
+    pub fn to_text_named(&self, meta: &Metadata) -> String {
         let ext = self.kind.extension();
         let mut out = format!(
             "// Warcraft III {} (war3map.{ext}). Saving writes the binary file back.\n[{ext}]\nversion={}\n",
@@ -162,13 +163,13 @@ impl ObjectData {
         for (original, table) in [(true, &self.originals), (false, &self.customs)] {
             for object in table {
                 out.push('\n');
-                self.object_text(&mut out, names, original, object);
+                self.object_text(&mut out, meta, original, object);
             }
         }
         out
     }
 
-    fn object_text(&self, out: &mut String, names: &FieldNames, original: bool, object: &Object) {
+    fn object_text(&self, out: &mut String, meta: &Metadata, original: bool, object: &Object) {
         let custom = !original;
         let shown = if custom || !object.id.is_none() {
             object.id
@@ -196,8 +197,10 @@ impl ObjectData {
                 if m.end != end {
                     *out += &format!(",end {}", id_text(m.end));
                 }
-                if let Some(name) = names.get(m.field) {
-                    *out += &format!(" // {name}");
+                match meta.get(m.field) {
+                    Some(f) if f.ty.is_empty() => *out += &format!(" // {}", f.name),
+                    Some(f) => *out += &format!(" // {}: {}", f.name, f.ty),
+                    None => {}
                 }
                 out.push('\n');
             }
@@ -214,11 +217,30 @@ pub fn is_object_text(doc: &bni_rs::Document) -> bool {
 }
 
 /// What [`from_text`] read: the data, when the text has no errors, and
-/// every error, in order.
+/// every error, in order; and, errors or not, what it could read of the
+/// file's kind and version and of each field, with where it is, for
+/// [`check`](crate::check).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parsed {
     pub data: Option<ObjectData>,
     pub errors: Vec<ParseError>,
+    /// The file's kind, when its section says.
+    pub kind: Option<Kind>,
+    pub version: u32,
+    /// Every field read without an error, in order.
+    pub fields: Vec<FieldAt>,
+}
+
+/// A field of the text and where it is.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldAt {
+    /// The object it belongs to: the standard one a custom object is
+    /// based on, or the standard one itself.
+    pub base: Rawcode,
+    pub field: Mod,
+    /// The key (`Hbz1[3].B`) and the value, without `,end ...`.
+    pub key: Span,
+    pub value: Span,
 }
 
 /// Reads the text form. Every error is reported, not just the first;
@@ -242,14 +264,14 @@ pub fn from_bni(doc: &bni_rs::Document) -> Parsed {
             1,
             1,
         ));
-        return Parsed { data: None, errors };
+        return Parsed::failed(errors);
     };
     let Some(kind) = Kind::from_extension(&head.name.text) else {
         errors.push(error(
             head.name.span,
             "expected the file's section first: [w3a] [w3b] [w3d] [w3h] [w3q] [w3t] or [w3u]",
         ));
-        return Parsed { data: None, errors };
+        return Parsed::failed(errors);
     };
     let version = header(head, &mut errors);
     let mut data = ObjectData {
@@ -258,8 +280,9 @@ pub fn from_bni(doc: &bni_rs::Document) -> Parsed {
         originals: Vec::new(),
         customs: Vec::new(),
     };
+    let mut fields = Vec::new();
     for section in objects {
-        if let Some((original, object)) = object(section, kind, version, &mut errors) {
+        if let Some((original, object)) = object(section, kind, version, &mut errors, &mut fields) {
             if original {
                 data.originals.push(object)
             } else {
@@ -268,7 +291,25 @@ pub fn from_bni(doc: &bni_rs::Document) -> Parsed {
         }
     }
     let data = errors.is_empty().then_some(data);
-    Parsed { data, errors }
+    Parsed {
+        data,
+        errors,
+        kind: Some(kind),
+        version,
+        fields,
+    }
+}
+
+impl Parsed {
+    fn failed(errors: Vec<ParseError>) -> Parsed {
+        Parsed {
+            data: None,
+            errors,
+            kind: None,
+            version: crate::LATEST_VERSION,
+            fields: Vec::new(),
+        }
+    }
 }
 
 fn error(span: Span, message: impl Into<String>) -> ParseError {
@@ -357,6 +398,7 @@ fn object(
     kind: Kind,
     version: u32,
     errors: &mut Vec<ParseError>,
+    fields: &mut Vec<FieldAt>,
 ) -> Option<(bool, Object)> {
     let before = errors.len();
     let named = parse_id(section.name.text.trim());
@@ -441,7 +483,13 @@ fn object(
                 }
             }
             _ => {
-                if let Some(m) = field(item, key, kind, version, end, errors) {
+                if let Some((m, value)) = field(item, key, kind, version, end, errors) {
+                    fields.push(FieldAt {
+                        base,
+                        field: m.clone(),
+                        key: key.span,
+                        value,
+                    });
                     if object.sets.is_empty() {
                         object.sets.push(Set {
                             flags: 0,
@@ -504,7 +552,7 @@ fn field(
     version: u32,
     end: Rawcode,
     errors: &mut Vec<ParseError>,
-) -> Option<Mod> {
+) -> Option<(Mod, Span)> {
     let (field, level, column, addressed) = match parse_key(key.text.trim()) {
         Ok(parts) => parts,
         Err(message) => {
@@ -561,13 +609,14 @@ fn field(
             }
         }
     };
-    Some(Mod {
+    let m = Mod {
         field,
         level,
         column,
         value,
         end,
-    })
+    };
+    Some((m, value_field.span))
 }
 
 fn value(field: &Field) -> Result<Value, ParseError> {

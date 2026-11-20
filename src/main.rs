@@ -3,7 +3,7 @@
 
 use std::process::ExitCode;
 
-use w3abdhqtu_rs::{FieldNames, Kind, STRINGS_FILES, from_text, parse};
+use w3abdhqtu_rs::{Kind, Metadata, STRINGS_FILES, from_text, parse};
 
 fn usage() {
     eprintln!(
@@ -16,6 +16,10 @@ fn usage() {
         "                                            the game's files (Units/UnitMetaData.slk, ...),"
     );
     eprintln!("                                            fields get their names as comments");
+    eprintln!(
+        "       w3abdhqtu-rs --check <file> <game>   check the fields of a .w3? file or a text form"
+    );
+    eprintln!("                                            against the game's metadata");
     eprintln!("       w3abdhqtu-rs --build <text> <out>    write the binary file from a text form");
     eprintln!();
     eprintln!("  .w3? is any of .w3a .w3b .w3d .w3h .w3q .w3t .w3u");
@@ -38,6 +42,7 @@ fn main() -> ExitCode {
             read(path).map(|data| print!("{}", data.to_text_named(&names(game, data.kind))))
         }
         ["--build", text, out] => build(text, out),
+        ["--check", path, game] => lint(path, game),
         paths if !paths.iter().any(|p| p.starts_with('-')) => {
             let failed = paths
                 .iter()
@@ -73,7 +78,7 @@ fn read(path: &str) -> Result<w3abdhqtu_rs::ObjectData, String> {
 
 /// Field names from the game's files extracted to the folder `game`; a
 /// file is looked up in any case. Missing files mean fewer names.
-fn names(game: &str, kind: Kind) -> FieldNames {
+fn names(game: &str, kind: Kind) -> Metadata {
     let read = |name: &str| {
         let mut path = std::path::PathBuf::from(game);
         for part in name.split('\\') {
@@ -89,11 +94,50 @@ fn names(game: &str, kind: Kind) -> FieldNames {
     };
     let Some(metadata) = read(kind.metadata_file()) else {
         eprintln!("{game}: no {}", kind.metadata_file());
-        return FieldNames::default();
+        return Metadata::default();
     };
     let strings: Vec<String> = STRINGS_FILES.iter().filter_map(|f| read(f)).collect();
     let strings: Vec<&str> = strings.iter().map(String::as_str).collect();
-    FieldNames::from_metadata(&metadata, &strings)
+    let meta = Metadata::from_tables(&metadata, &strings);
+    match kind.objects_file().and_then(read) {
+        Some(objects) => meta.with_codes(&objects),
+        None => meta,
+    }
+}
+
+/// Prints what `check` finds in a binary file (through its text form)
+/// or a text form; fails when it finds anything.
+fn lint(path: &str, game: &str) -> Result<(), String> {
+    let text = match Kind::from_path(path) {
+        Some(_) => read(path)?.to_text(),
+        None => std::fs::read_to_string(path).map_err(|err| format!("{path}: {err}"))?,
+    };
+    let parsed = from_text(&text);
+    for e in &parsed.errors {
+        println!("{path}:{}:{}: error: {}", e.line, e.col, e.message);
+    }
+    let Some(kind) = parsed.kind else {
+        return Err(format!("{path}: not object data"));
+    };
+    let found = w3abdhqtu_rs::check(&parsed, &names(game, kind));
+    for d in &found {
+        let col = d.span.map_or(1, |s| s.start_col);
+        println!(
+            "{path}:{}:{col}: {} [{}]: {}",
+            d.line,
+            d.level.as_str(),
+            d.rule,
+            d.message
+        );
+    }
+    if parsed.errors.is_empty() && found.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{path}: {} problems",
+            parsed.errors.len() + found.len()
+        ))
+    }
 }
 
 fn build(text_path: &str, out: &str) -> Result<(), String> {

@@ -232,7 +232,8 @@ fn game_file(dir: &str, name: &str) -> Option<String> {
 /// byte for byte, and goes through the text form unchanged:
 /// `W3ABDHQTU_CORPUS=dir cargo test corpus -- --ignored`. With
 /// `$W3ABDHQTU_GAME`, the game's files extracted to a folder, every field
-/// gets a name too, and the text with the names goes through as well.
+/// gets a name too, the text with the names goes through as well, and
+/// `check` finds no wrong types, unknown fields or fields of other objects.
 #[test]
 #[ignore]
 fn corpus() {
@@ -241,7 +242,7 @@ fn corpus() {
     let game = std::env::var("W3ABDHQTU_GAME").ok();
     let names = |kind: Kind| {
         let Some(game) = &game else {
-            return FieldNames::default();
+            return Metadata::default();
         };
         let metadata = game_file(game, kind.metadata_file()).expect("metadata table");
         let strings: Vec<String> = STRINGS_FILES
@@ -249,9 +250,13 @@ fn corpus() {
             .filter_map(|f| game_file(game, f))
             .collect();
         let strings: Vec<&str> = strings.iter().map(String::as_str).collect();
-        FieldNames::from_metadata(&metadata, &strings)
+        let meta = Metadata::from_tables(&metadata, &strings);
+        match kind.objects_file().and_then(|f| game_file(game, f)) {
+            Some(objects) => meta.with_codes(&objects),
+            None => meta,
+        }
     };
-    let names: Vec<(Kind, FieldNames)> = Kind::ALL.into_iter().map(|k| (k, names(k))).collect();
+    let names: Vec<(Kind, Metadata)> = Kind::ALL.into_iter().map(|k| (k, names(k))).collect();
     let mut checked = 0;
     for entry in std::fs::read_dir(&dir).unwrap() {
         let path = entry.unwrap().path();
@@ -275,6 +280,19 @@ fn corpus() {
             path.display()
         );
         if game.is_some() {
+            // Real maps store every value as its type, and every field is
+            // the game's and its object's. (Values past World Editor's
+            // limits and level-0 leftovers of old versions do happen.)
+            for d in check(&back, names) {
+                assert!(
+                    d.rule == parser_rs::rule::OBJECT_VALUE_RANGE
+                        || d.rule == parser_rs::rule::OBJECT_FIELD_LEVEL,
+                    "{}:{}: {}",
+                    path.display(),
+                    d.line,
+                    d.message
+                );
+            }
             for m in data.objects().flat_map(|o| o.mods()) {
                 assert!(
                     names.get(m.field).is_some(),

@@ -269,7 +269,7 @@ fn not_object_text() {
 #[test]
 fn field_names_as_comments() {
     let meta = "ID;PWXL;N;E\nC;X1;Y1;K\"ID\"\nC;X2;K\"displayName\"\nC;X1;Y2;K\"Hbz1\"\nC;X2;K\"WESTRING_AEVAL_HBZ1\"\nE\n";
-    let names = FieldNames::from_metadata(meta, &["WESTRING_AEVAL_HBZ1=Number of Waves // all"]);
+    let names = Metadata::from_tables(meta, &["WESTRING_AEVAL_HBZ1=Number of Waves // all"]);
     let id = Rawcode(*b"A000");
     let d = data(
         Kind::Ability,

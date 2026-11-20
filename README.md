@@ -51,6 +51,8 @@ w3abdhqtu-rs --text <file.w3?>      print the text form
 w3abdhqtu-rs --text <file.w3?> <game>
                                     with field names, from the game's files
                                     extracted to the folder <game>
+w3abdhqtu-rs --check <file> <game>  check a .w3? file or a text form against
+                                    the game's metadata
 w3abdhqtu-rs --build <text> <out>   write the binary file from a text form
 ```
 
@@ -95,14 +97,14 @@ the [`wc3-rs`](../wc3-rs) editor shows and saves.
 version=2
 
 [ACwe]
-arlv=6 // Required Level
-aret="TRIGSTR_287",end 0x00000000 // Tooltip - Learn
+arlv=6 // Required Level: int
+aret="TRIGSTR_287",end 0x00000000 // Tooltip - Learn: string
 
 [A000]
 _parent=AHbz
-anam="Blizzard" // Name
-aub1[2]="Line one"\n"Line two" // Tooltip - Normal - Extended
-Hbz1[3].B=unreal 0.25,end A000 // Number of Waves
+anam="Blizzard" // Name: string
+aub1[2]="Line one"\n"Line two" // Tooltip - Normal - Extended: string
+Hbz1[3].A=12,end A000 // Number of Waves: int
 ```
 
 - **The file's section** comes first: `[w3a]` ... `[w3u]`, with
@@ -132,22 +134,58 @@ Hbz1[3].B=unreal 0.25,end A000 // Number of Waves
   says. Real files have none of these but sets.
 - **Errors.** Every line with a problem is reported, with its place,
   and there's data only when there are none.
-- **Field names** (`to_text_named`) are comments after the fields, the
-  names World Editor shows. They're only for reading, and come from the
-  game's files (below); without them the text is the same minus the
-  comments.
+- **Field names and types** (`to_text_named`) are comments after the
+  fields: the names World Editor shows and the metadata types. They're
+  only for reading, and come from the game's files (below); without them
+  the text is the same minus the comments.
 - Comments and spacing aren't kept: the binary file has no room for them.
 
-## Field names
+## Metadata
 
-`FieldNames::from_metadata(metadata, strings)` reads a kind's metadata
-table (`Kind::metadata_file`: `Units\AbilityMetaData.slk` for
-abilities, `Units\UnitMetaData.slk` for units and items, ...) and the
-editor's strings (`STRINGS_FILES`: `UI\WorldEditStrings.txt`, then
-`UI\WorldEditGameStrings.txt` over it). A row's `ID` is the field id and
-its `displayName` a key into the strings (`WESTRING_UEVAL_UHPM` →
-`Hit Points Maximum (Base)`); a key the strings don't have falls back to
-the row's `field` (`HP`). The first row of an id wins.
+`Metadata::from_tables(table, strings)` reads a kind's metadata table
+(`Kind::metadata_file`: `Units\AbilityMetaData.slk` for abilities,
+`Units\UnitMetaData.slk` for units and items, ...) and the editor's
+strings (`STRINGS_FILES`: `UI\WorldEditStrings.txt`, then
+`UI\WorldEditGameStrings.txt` over it). `with_codes(objects)` adds the
+abilities' codes from `Units\AbilityData.slk` (`Kind::objects_file`).
+They come from the project's game, never from a copy in this crate: the
+game version decides which fields there are.
+
+Each row is a field (`FieldMeta`), by its `ID`:
+
+- **name**: `displayName` is a key into the strings (`WESTRING_UEVAL_UHPM`
+  → `Hit Points Maximum (Base)`); a key the strings don't have falls back
+  to the row's `field` (`HP`). The first row of an id wins.
+- **type** (`type`) and how it's stored (`Storage`). Checked on 104,000
+  fields of real maps: `int`, `bool` and the flag types (`attackBits`,
+  `channelFlags`, ...) are integers, `real` reals, `unreal` unreals, and
+  everything else (lists, ids, models, the game's enumerations like
+  `attackType`) strings. A type not in these lists, a newer game's, isn't
+  checked.
+- **limits** (`minVal`, `maxVal`) when they're numbers; `TTName` and the
+  like aren't.
+- **levels** (`repeat` above 0) and the **data column** (`data`, `Data A`
+  is 1).
+- **whose** it is: `useSpecific` / `notSpecific` list ability codes;
+  `useItem` and `useUnit` / `useHero` / `useBuilding` say whether items
+  and units have a units' table field.
+
+## Checks
+
+`check(&parsed, &meta)` checks a parsed text form (`from_text` /
+`from_bni` keep each field with its place, `Parsed::fields`, even when
+other lines have errors) and gives lint diagnostics, each its own rule:
+
+| rule | level | finds |
+|------|-------|-------|
+| `object-value-type` | error | a value stored as another type than the field's: `anam=5`, `acdn[1]=6` for an unreal. The game misreads it. Quick fix: the same value as the right type (`"5"`, `unreal 6.0`) |
+| `object-value-range` | warning | a number outside World Editor's limits, a `bool` other than 0 or 1. World Editor lets a map go past its limits (Shift+Enter), so real maps do: 562 of 104,000 fields |
+| `object-unknown-field` | warning | a field the game's metadata doesn't have: a typo, or a field of a newer game |
+| `object-field-level` | warning | a level on a field without levels, level 0 on one with (old maps have a few, Blizzard's campaign too), another data column than the field's. Quick fix: the right key |
+| `object-field-owner` | warning | an ability's data field on an ability whose code isn't among its `useSpecific` (`Hbz1` on `AHtb`; `AIsz`'s code is `Aspo`, so it has `Aspo`'s fields), a units-only field on an item. `.w3u` isn't checked for items' fields: Reign of Chaos maps keep items there |
+
+Version 1 doodads have no levels, so nothing is checked about them.
+Without metadata, nothing is checked.
 
 Version 1 doodads have no levels, so a variation is the id's last digit:
 `dvr2` is the second variation's `dvr1`, `dvr0` the tenth's. A row with
@@ -178,7 +216,10 @@ a string containing NUL.
   was among them; version 3 is covered by unit tests.
 - The text form reads back every one of them unchanged.
 - Every field of those files gets a name from 1.26's metadata.
-- Not yet: field types and value checks from the metadata tables.
+- Checked against 1.26's metadata: no wrong types, unknown fields or
+  fields of other objects in any of them; 562 values past World Editor's
+  limits and 20 level-0 values (rules `object-value-range` and
+  `object-field-level`).
 
 ## Tests
 
@@ -193,4 +234,5 @@ The corpus test reads every `.w3?` file in the folder and checks both
 round trips: through the bytes and through the text form. With
 `W3ABDHQTU_GAME`, the game's files extracted to a folder
 (`Units/UnitMetaData.slk`, `UI/WorldEditStrings.txt`, ...), the text has
-the field names, and every field must get one.
+the field names, every field must get one, and `check` must find nothing
+but values past the limits and level-0 leftovers.
