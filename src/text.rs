@@ -18,7 +18,7 @@
 use bni_rs::ast::{Field, Item, Section, ValueKind};
 use parser_rs::{ParseError, Rawcode, Span};
 
-use crate::{Kind, Mod, Object, ObjectData, Set, Value};
+use crate::{FieldNames, Kind, Mod, Object, ObjectData, Set, Value};
 
 impl Kind {
     /// What the file holds, in words.
@@ -146,6 +146,13 @@ fn value_text(value: &Value) -> String {
 impl ObjectData {
     /// The text form. [`from_text`] reads it back into the same data.
     pub fn to_text(&self) -> String {
+        self.to_text_named(&FieldNames::default())
+    }
+
+    /// [`to_text`](Self::to_text), with each field's name from `names` as
+    /// a comment after it: `uhpm=500 // Hit Points Maximum (Base)`.
+    /// Comments are only for reading; [`from_text`] skips them.
+    pub fn to_text_named(&self, names: &FieldNames) -> String {
         let ext = self.kind.extension();
         let mut out = format!(
             "// Warcraft III {} (war3map.{ext}). Saving writes the binary file back.\n[{ext}]\nversion={}\n",
@@ -155,13 +162,13 @@ impl ObjectData {
         for (original, table) in [(true, &self.originals), (false, &self.customs)] {
             for object in table {
                 out.push('\n');
-                self.object_text(&mut out, original, object);
+                self.object_text(&mut out, names, original, object);
             }
         }
         out
     }
 
-    fn object_text(&self, out: &mut String, original: bool, object: &Object) {
+    fn object_text(&self, out: &mut String, names: &FieldNames, original: bool, object: &Object) {
         let custom = !original;
         let shown = if custom || !object.id.is_none() {
             object.id
@@ -188,6 +195,9 @@ impl ObjectData {
                 *out += &format!("{}={}", key_text(m), value_text(&m.value));
                 if m.end != end {
                     *out += &format!(",end {}", id_text(m.end));
+                }
+                if let Some(name) = names.get(m.field) {
+                    *out += &format!(" // {name}");
                 }
                 out.push('\n');
             }

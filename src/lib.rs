@@ -16,17 +16,22 @@
 //!
 //! Reading and writing are exact: `to_bytes` gives back the bytes `parse`
 //! read. The text form (`to_text`, `from_text`) is BNI, and exact too:
-//! `from_text(to_text(data))` is `data`. Both formats are described in the
+//! `from_text(to_text(data))` is `data`. `to_text_named` adds the names
+//! World Editor gives the fields, from the game's metadata tables
+//! ([`FieldNames`]), as comments. Both formats are described in the
 //! README.
 
 mod data;
 mod kind;
+mod names;
 mod read;
+mod slk;
 mod text;
 mod write;
 
 pub use data::{Mod, Object, ObjectData, Set, Value};
 pub use kind::Kind;
+pub use names::{FieldNames, STRINGS_FILES};
 pub use parser_rs::{BinError, BinResult, Rawcode};
 pub use read::parse;
 pub use text::{Parsed, from_bni, from_text, id_text, is_object_text, string_text};

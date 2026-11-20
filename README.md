@@ -48,6 +48,9 @@ The CLI:
 ```text
 w3abdhqtu-rs <file.w3?>...          check: read, write back, and through the text form
 w3abdhqtu-rs --text <file.w3?>      print the text form
+w3abdhqtu-rs --text <file.w3?> <game>
+                                    with field names, from the game's files
+                                    extracted to the folder <game>
 w3abdhqtu-rs --build <text> <out>   write the binary file from a text form
 ```
 
@@ -92,14 +95,14 @@ the [`wc3-rs`](../wc3-rs) editor shows and saves.
 version=2
 
 [ACwe]
-arlv=6
-aret="TRIGSTR_287",end 0x00000000
+arlv=6 // Required Level
+aret="TRIGSTR_287",end 0x00000000 // Tooltip - Learn
 
 [A000]
-_parent=ANwm
-anam="Blizzard"
-aub1[2]="Line one"\n"Line two"
-Hbz1[3].B=unreal 0.25,end A000
+_parent=AHbz
+anam="Blizzard" // Name
+aub1[2]="Line one"\n"Line two" // Tooltip - Normal - Extended
+Hbz1[3].B=unreal 0.25,end A000 // Number of Waves
 ```
 
 - **The file's section** comes first: `[w3a]` ... `[w3u]`, with
@@ -129,7 +132,32 @@ Hbz1[3].B=unreal 0.25,end A000
   says. Real files have none of these but sets.
 - **Errors.** Every line with a problem is reported, with its place,
   and there's data only when there are none.
+- **Field names** (`to_text_named`) are comments after the fields, the
+  names World Editor shows. They're only for reading, and come from the
+  game's files (below); without them the text is the same minus the
+  comments.
 - Comments and spacing aren't kept: the binary file has no room for them.
+
+## Field names
+
+`FieldNames::from_metadata(metadata, strings)` reads a kind's metadata
+table (`Kind::metadata_file`: `Units\AbilityMetaData.slk` for
+abilities, `Units\UnitMetaData.slk` for units and items, ...) and the
+editor's strings (`STRINGS_FILES`: `UI\WorldEditStrings.txt`, then
+`UI\WorldEditGameStrings.txt` over it). A row's `ID` is the field id and
+its `displayName` a key into the strings (`WESTRING_UEVAL_UHPM` →
+`Hit Points Maximum (Base)`); a key the strings don't have falls back to
+the row's `field` (`HP`). The first row of an id wins.
+
+Version 1 doodads have no levels, so a variation is the id's last digit:
+`dvr2` is the second variation's `dvr1`, `dvr0` the tenth's. A row with
+`repeat` whose id ends in `1` names these too (`..., variation 2`),
+unless the table has a row of their own.
+
+The SLK reader (`slk.rs`) is only what these tables need: cell values by
+row and column, `;;` escapes, `X`/`Y` carried over from record to record;
+formats and formulas are skipped. Finding the files (archives, game
+folders) is the caller's job.
 
 ## Data model
 
@@ -149,14 +177,20 @@ a string containing NUL.
   (Blizzard's melee and campaign maps, custom maps). No version 3 file
   was among them; version 3 is covered by unit tests.
 - The text form reads back every one of them unchanged.
-- Not yet: field names, types and value checks from the metadata SLKs.
+- Every field of those files gets a name from 1.26's metadata.
+- Not yet: field types and value checks from the metadata tables.
 
 ## Tests
 
 ```sh
 cargo test
 W3ABDHQTU_CORPUS=path/to/files cargo test --lib corpus -- --ignored
+W3ABDHQTU_CORPUS=path/to/files W3ABDHQTU_GAME=path/to/extracted/game \
+    cargo test --lib corpus -- --ignored
 ```
 
 The corpus test reads every `.w3?` file in the folder and checks both
-round trips: through the bytes and through the text form.
+round trips: through the bytes and through the text form. With
+`W3ABDHQTU_GAME`, the game's files extracted to a folder
+(`Units/UnitMetaData.slk`, `UI/WorldEditStrings.txt`, ...), the text has
+the field names, and every field must get one.

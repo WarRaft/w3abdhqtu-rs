@@ -214,13 +214,44 @@ fn kinds_by_extension() {
     }
 }
 
+/// A file of the game's files extracted to `dir`, looked up in any case.
+fn game_file(dir: &str, name: &str) -> Option<String> {
+    let mut path = std::path::PathBuf::from(dir);
+    for part in name.split('\\') {
+        let entry = std::fs::read_dir(&path).ok()?.flatten().find(|e| {
+            e.file_name()
+                .to_str()
+                .is_some_and(|n| n.eq_ignore_ascii_case(part))
+        })?;
+        path = entry.path();
+    }
+    Some(String::from_utf8_lossy(&std::fs::read(path).ok()?).into_owned())
+}
+
 /// Every object-data file in `$W3ABDHQTU_CORPUS` reads and writes back
-/// byte for byte, and goes through the text form unchanged: `W3ABDHQTU_CORPUS=dir cargo test corpus -- --ignored`.
+/// byte for byte, and goes through the text form unchanged:
+/// `W3ABDHQTU_CORPUS=dir cargo test corpus -- --ignored`. With
+/// `$W3ABDHQTU_GAME`, the game's files extracted to a folder, every field
+/// gets a name too, and the text with the names goes through as well.
 #[test]
 #[ignore]
 fn corpus() {
     let dir =
         std::env::var("W3ABDHQTU_CORPUS").expect("set W3ABDHQTU_CORPUS to a folder of .w3? files");
+    let game = std::env::var("W3ABDHQTU_GAME").ok();
+    let names = |kind: Kind| {
+        let Some(game) = &game else {
+            return FieldNames::default();
+        };
+        let metadata = game_file(game, kind.metadata_file()).expect("metadata table");
+        let strings: Vec<String> = STRINGS_FILES
+            .iter()
+            .filter_map(|f| game_file(game, f))
+            .collect();
+        let strings: Vec<&str> = strings.iter().map(String::as_str).collect();
+        FieldNames::from_metadata(&metadata, &strings)
+    };
+    let names: Vec<(Kind, FieldNames)> = Kind::ALL.into_iter().map(|k| (k, names(k))).collect();
     let mut checked = 0;
     for entry in std::fs::read_dir(&dir).unwrap() {
         let path = entry.unwrap().path();
@@ -234,6 +265,25 @@ fn corpus() {
             "{}: differs after writing",
             path.display()
         );
+        let names = &names.iter().find(|(k, _)| *k == kind).unwrap().1;
+        let text = data.to_text_named(names);
+        let back = from_text(&text);
+        assert_eq!(back.errors, vec![], "{}", path.display());
+        assert!(
+            back.data.as_ref() == Some(&data),
+            "{}: differs after the text form",
+            path.display()
+        );
+        if game.is_some() {
+            for m in data.objects().flat_map(|o| o.mods()) {
+                assert!(
+                    names.get(m.field).is_some(),
+                    "{}: field {} has no name",
+                    path.display(),
+                    m.field
+                );
+            }
+        }
         checked += 1;
     }
     assert!(checked > 0, "no object-data files in {dir}");

@@ -265,3 +265,31 @@ fn not_object_text() {
     )));
     assert!(!is_object_text(&bni_rs::parse("")));
 }
+
+#[test]
+fn field_names_as_comments() {
+    let meta = "ID;PWXL;N;E\nC;X1;Y1;K\"ID\"\nC;X2;K\"displayName\"\nC;X1;Y2;K\"Hbz1\"\nC;X2;K\"WESTRING_AEVAL_HBZ1\"\nE\n";
+    let names = FieldNames::from_metadata(meta, &["WESTRING_AEVAL_HBZ1=Number of Waves // all"]);
+    let id = Rawcode(*b"A000");
+    let d = data(
+        Kind::Ability,
+        2,
+        vec![],
+        vec![object(
+            b"AHbz",
+            id,
+            vec![
+                m(b"Hbz1", 3, 2, Value::Int(6), id),
+                m(b"anam", 0, 0, Value::Str("Storm".into()), Rawcode::NONE),
+            ],
+        )],
+    );
+    let text = d.to_text_named(&names);
+    assert!(
+        text.contains("Hbz1[3].B=6,end A000 // Number of Waves // all\nanam=\"Storm\"\n"),
+        "{text}"
+    );
+    let parsed = from_text(&text);
+    assert_eq!(parsed.errors, vec![]);
+    assert_eq!(parsed.data, Some(d));
+}

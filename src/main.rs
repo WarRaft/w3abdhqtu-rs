@@ -3,13 +3,19 @@
 
 use std::process::ExitCode;
 
-use w3abdhqtu_rs::{Kind, from_text, parse};
+use w3abdhqtu_rs::{FieldNames, Kind, STRINGS_FILES, from_text, parse};
 
 fn usage() {
     eprintln!(
         "usage: w3abdhqtu-rs <file.w3?>...           check: read, write back, and through the text form"
     );
-    eprintln!("       w3abdhqtu-rs --text <file.w3?>       print the text form (BNI)");
+    eprintln!(
+        "       w3abdhqtu-rs --text <file.w3?> [<game>] print the text form (BNI); with the folder of"
+    );
+    eprintln!(
+        "                                            the game's files (Units/UnitMetaData.slk, ...),"
+    );
+    eprintln!("                                            fields get their names as comments");
     eprintln!("       w3abdhqtu-rs --build <text> <out>    write the binary file from a text form");
     eprintln!();
     eprintln!("  .w3? is any of .w3a .w3b .w3d .w3h .w3q .w3t .w3u");
@@ -28,6 +34,9 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
         ["--text", path] => read(path).map(|data| print!("{}", data.to_text())),
+        ["--text", path, game] => {
+            read(path).map(|data| print!("{}", data.to_text_named(&names(game, data.kind))))
+        }
         ["--build", text, out] => build(text, out),
         paths if !paths.iter().any(|p| p.starts_with('-')) => {
             let failed = paths
@@ -60,6 +69,31 @@ fn read(path: &str) -> Result<w3abdhqtu_rs::ObjectData, String> {
     ))?;
     let bytes = std::fs::read(path).map_err(|err| format!("{path}: {err}"))?;
     parse(&bytes, kind).map_err(|err| format!("{path}: {err}"))
+}
+
+/// Field names from the game's files extracted to the folder `game`; a
+/// file is looked up in any case. Missing files mean fewer names.
+fn names(game: &str, kind: Kind) -> FieldNames {
+    let read = |name: &str| {
+        let mut path = std::path::PathBuf::from(game);
+        for part in name.split('\\') {
+            let entry = std::fs::read_dir(&path).ok()?.flatten().find(|e| {
+                e.file_name()
+                    .to_str()
+                    .is_some_and(|n| n.eq_ignore_ascii_case(part))
+            })?;
+            path = entry.path();
+        }
+        let bytes = std::fs::read(&path).ok()?;
+        Some(String::from_utf8_lossy(&bytes).into_owned())
+    };
+    let Some(metadata) = read(kind.metadata_file()) else {
+        eprintln!("{game}: no {}", kind.metadata_file());
+        return FieldNames::default();
+    };
+    let strings: Vec<String> = STRINGS_FILES.iter().filter_map(|f| read(f)).collect();
+    let strings: Vec<&str> = strings.iter().map(String::as_str).collect();
+    FieldNames::from_metadata(&metadata, &strings)
 }
 
 fn build(text_path: &str, out: &str) -> Result<(), String> {
