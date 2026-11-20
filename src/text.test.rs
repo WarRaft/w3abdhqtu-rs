@@ -293,3 +293,24 @@ fn field_names_as_comments() {
     assert_eq!(parsed.errors, vec![]);
     assert_eq!(parsed.data, Some(d));
 }
+
+#[test]
+fn fields_under_the_cursor() {
+    let doc =
+        bni_rs::parse("[w3a]\nversion=2\n[A000]\nHbz1[2].A=oops\n_parent=AHbz\n[ACwe]\n  arlv=6\n");
+    let at = |line, col| field_at(&doc, line, col).map(|f| (f.field, f.object, f.base));
+    let (hbz1, a000, ahbz) = (Rawcode(*b"Hbz1"), Rawcode(*b"A000"), Rawcode(*b"AHbz"));
+    // Anywhere on the key, to its end; a broken value doesn't matter, nor
+    // where `_parent` is.
+    assert_eq!(at(4, 1), Some((hbz1, a000, ahbz)));
+    assert_eq!(at(4, 10), Some((hbz1, a000, ahbz)));
+    assert_eq!(at(4, 11), None);
+    let acwe = Rawcode(*b"ACwe");
+    assert_eq!(at(7, 3), Some((Rawcode(*b"arlv"), acwe, acwe)));
+    // The key's span takes its indent in.
+    assert_eq!(at(7, 1), Some((Rawcode(*b"arlv"), acwe, acwe)));
+    // Not on a key, or not object text.
+    assert_eq!(at(2, 1), None);
+    assert_eq!(field_at(&bni_rs::parse("[a]\n[b]\nx=1\n"), 3, 1), None);
+    assert_eq!(field_at(&doc, 4, 1).unwrap().kind, Kind::Ability);
+}

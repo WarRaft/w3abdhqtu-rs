@@ -187,6 +187,10 @@ other lines have errors) and gives lint diagnostics, each its own rule:
 Version 1 doodads have no levels, so nothing is checked about them.
 Without metadata, nothing is checked.
 
+`field_at(&doc, line, col)` finds the field key under a cursor (for a
+hover): the field, its object and the standard object that is based on,
+read from the key and the section alone, so a broken value doesn't matter.
+
 Version 1 doodads have no levels, so a variation is the id's last digit:
 `dvr2` is the second variation's `dvr1`, `dvr0` the tenth's. A row with
 `repeat` whose id ends in `1` names these too (`..., variation 2`),

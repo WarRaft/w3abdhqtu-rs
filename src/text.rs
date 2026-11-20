@@ -377,6 +377,52 @@ fn header(section: &Section, errors: &mut Vec<ParseError>) -> u32 {
     })
 }
 
+/// The field whose key is at `line`, `col` (1-indexed, columns in
+/// characters, as BNI spans count), for a hover: [`FieldRef`]. Read from
+/// the key alone, so its value may be anything, even broken.
+pub fn field_at(doc: &bni_rs::Document, line: usize, col: usize) -> Option<FieldRef> {
+    let (head, objects) = doc.sections.split_first()?;
+    let kind = Kind::from_extension(&head.name.text)?;
+    for section in objects {
+        for item in &section.items {
+            let Some(key) = &item.key else { continue };
+            let span = key.span;
+            if span.start_line != line || col < span.start_col || col > span.end_col {
+                continue;
+            }
+            let text = key.text.trim();
+            let id = text.split(['[', '.']).next().unwrap_or(text);
+            let field = parse_id(id)?;
+            let named = parse_id(section.name.text.trim());
+            let parent = section.items.iter().find_map(|i| {
+                let key = i.key.as_ref()?;
+                (key.text.trim() == PARENT).then(|| parse_id(i.fields.first()?.text().trim()))?
+            });
+            return Some(FieldRef {
+                kind,
+                field,
+                key: span,
+                object: named.unwrap_or(Rawcode::NONE),
+                base: parent.or(named).unwrap_or(Rawcode::NONE),
+            });
+        }
+    }
+    None
+}
+
+/// A field key in a text form ([`field_at`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FieldRef {
+    pub kind: Kind,
+    pub field: Rawcode,
+    /// Where the key is.
+    pub key: Span,
+    /// The object it's in, and the standard one that is based on (itself
+    /// for a standard one).
+    pub object: Rawcode,
+    pub base: Rawcode,
+}
+
 /// `hfoo` or `0x6866F6F6`.
 fn parse_id(text: &str) -> Option<Rawcode> {
     let bytes = text.as_bytes();

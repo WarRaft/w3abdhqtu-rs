@@ -37,7 +37,9 @@ pub use kind::Kind;
 pub use metadata::{FieldMeta, Metadata, STRINGS_FILES, Storage};
 pub use parser_rs::{BinError, BinResult, Rawcode};
 pub use read::parse;
-pub use text::{FieldAt, Parsed, from_bni, from_text, id_text, is_object_text, string_text};
+pub use text::{
+    FieldAt, FieldRef, Parsed, field_at, from_bni, from_text, id_text, is_object_text, string_text,
+};
 
 /// The format versions this crate reads and writes.
 pub const VERSIONS: std::ops::RangeInclusive<u32> = 1..=3;
