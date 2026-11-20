@@ -1,35 +1,87 @@
-//! `w3abdhqtu-rs <file>...`: reads each object-data file, prints what it
-//! holds, and checks that writing it back gives the same bytes.
+//! `w3abdhqtu-rs`: checks object-data files, prints their text form, and
+//! builds them back from it. See `usage`.
 
 use std::process::ExitCode;
 
-use w3abdhqtu_rs::{Kind, Value, parse};
+use w3abdhqtu_rs::{Kind, from_text, parse};
+
+fn usage() {
+    eprintln!(
+        "usage: w3abdhqtu-rs <file.w3?>...           check: read, write back, and through the text form"
+    );
+    eprintln!("       w3abdhqtu-rs --text <file.w3?>       print the text form (BNI)");
+    eprintln!("       w3abdhqtu-rs --build <text> <out>    write the binary file from a text form");
+    eprintln!();
+    eprintln!("  .w3? is any of .w3a .w3b .w3d .w3h .w3q .w3t .w3u");
+}
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let verbose = args.iter().any(|a| a == "-v" || a == "--verbose");
-    let paths: Vec<&String> = args.iter().filter(|a| !a.starts_with('-')).collect();
-    if paths.is_empty() {
-        eprintln!("usage: w3abdhqtu-rs [-v] <file.w3a|w3b|w3d|w3h|w3q|w3t|w3u>...");
-        eprintln!("  prints a summary of each file (-v: every field) and checks the round trip");
-        return ExitCode::FAILURE;
-    }
-
-    let mut failed = 0;
-    for path in paths {
-        if let Err(err) = run(path, verbose) {
-            eprintln!("{path}: {err}");
-            failed += 1;
+    let result = match args
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        [] | ["-h" | "--help"] => {
+            usage();
+            return ExitCode::FAILURE;
         }
-    }
-    if failed > 0 {
-        ExitCode::FAILURE
-    } else {
-        ExitCode::SUCCESS
+        ["--text", path] => read(path).map(|data| print!("{}", data.to_text())),
+        ["--build", text, out] => build(text, out),
+        paths if !paths.iter().any(|p| p.starts_with('-')) => {
+            let failed = paths
+                .iter()
+                .filter(|p| check(p).map_err(|err| eprintln!("{p}: {err}")).is_err())
+                .count();
+            return if failed > 0 {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            };
+        }
+        _ => {
+            usage();
+            return ExitCode::FAILURE;
+        }
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("{err}");
+            ExitCode::FAILURE
+        }
     }
 }
 
-fn run(path: &str, verbose: bool) -> Result<(), String> {
+fn read(path: &str) -> Result<w3abdhqtu_rs::ObjectData, String> {
+    let kind = Kind::from_path(path).ok_or(format!(
+        "{path}: not an object-data file (.w3a .w3b .w3d .w3h .w3q .w3t .w3u)"
+    ))?;
+    let bytes = std::fs::read(path).map_err(|err| format!("{path}: {err}"))?;
+    parse(&bytes, kind).map_err(|err| format!("{path}: {err}"))
+}
+
+fn build(text_path: &str, out: &str) -> Result<(), String> {
+    let text = std::fs::read_to_string(text_path).map_err(|err| format!("{text_path}: {err}"))?;
+    let parsed = from_text(&text);
+    for e in &parsed.errors {
+        eprintln!("{text_path}:{}:{}: {}", e.line, e.col, e.message);
+    }
+    let data = parsed
+        .data
+        .ok_or(format!("{text_path}: {} errors", parsed.errors.len()))?;
+    if Kind::from_path(out).is_some_and(|k| k != data.kind) {
+        return Err(format!(
+            "{out}: the text is .{} data",
+            data.kind.extension()
+        ));
+    }
+    let bytes = data.to_bytes().map_err(|err| format!("{out}: {err}"))?;
+    std::fs::write(out, bytes).map_err(|err| format!("{out}: {err}"))
+}
+
+fn check(path: &str) -> Result<(), String> {
     let kind = Kind::from_path(path)
         .ok_or("not an object-data file (.w3a .w3b .w3d .w3h .w3q .w3t .w3u)")?;
     let bytes = std::fs::read(path).map_err(|err| err.to_string())?;
@@ -41,31 +93,6 @@ fn run(path: &str, verbose: bool) -> Result<(), String> {
         data.originals.len(),
         data.customs.len()
     );
-    if verbose {
-        for object in data.objects() {
-            match object.id.is_none() {
-                true => println!("{}", object.base),
-                false => println!("{} : {}", object.id, object.base),
-            }
-            for (i, set) in object.sets.iter().enumerate() {
-                if object.sets.len() > 1 || set.flags != 0 {
-                    println!("  set {i}, flags {}", set.flags);
-                }
-                for m in &set.mods {
-                    let value = match &m.value {
-                        Value::Int(v) => v.to_string(),
-                        Value::Real(v) => format!("{v:?}"),
-                        Value::Unreal(v) => format!("{v:?} (unreal)"),
-                        Value::Str(s) => format!("{s:?}"),
-                    };
-                    match kind.has_levels(data.version) {
-                        true => println!("  {} [{}, {}] = {value}", m.field, m.level, m.column),
-                        false => println!("  {} = {value}", m.field),
-                    }
-                }
-            }
-        }
-    }
     let written = data
         .to_bytes()
         .map_err(|err| format!("can't write it back: {err}"))?;
@@ -78,6 +105,16 @@ fn run(path: &str, verbose: bool) -> Result<(), String> {
         return Err(format!(
             "written back differs from the original at byte 0x{at:X}"
         ));
+    }
+    let back = from_text(&data.to_text());
+    if let Some(e) = back.errors.first() {
+        return Err(format!(
+            "its text form has errors, first at line {}: {}",
+            e.line, e.message
+        ));
+    }
+    if back.data.as_ref() != Some(&data) {
+        return Err("differs after going through the text form".into());
     }
     Ok(())
 }

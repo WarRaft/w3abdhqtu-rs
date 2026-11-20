@@ -56,8 +56,10 @@ pub struct Mod {
 }
 
 /// A field's value. The type tag is stored in the file; which one a field
-/// takes comes from its metadata.
-#[derive(Debug, Clone, PartialEq)]
+/// takes comes from its metadata. Reals compare by their bits, so a NaN
+/// equals itself and `0.0` doesn't equal `-0.0`: equal values write equal
+/// bytes.
+#[derive(Debug, Clone)]
 pub enum Value {
     /// Tag 0: integers, booleans, enums and ids stored as integers.
     Int(i32),
@@ -67,6 +69,19 @@ pub enum Value {
     Unreal(f32),
     /// Tag 3: text, paths, lists, `TRIGSTR_` references.
     Str(String),
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Value) -> bool {
+        match (self, other) {
+            (Value::Int(a), Value::Int(b)) => a == b,
+            (Value::Real(a), Value::Real(b)) | (Value::Unreal(a), Value::Unreal(b)) => {
+                a.to_bits() == b.to_bits()
+            }
+            (Value::Str(a), Value::Str(b)) => a == b,
+            _ => false,
+        }
+    }
 }
 
 impl Value {

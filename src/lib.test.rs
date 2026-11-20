@@ -215,7 +215,7 @@ fn kinds_by_extension() {
 }
 
 /// Every object-data file in `$W3ABDHQTU_CORPUS` reads and writes back
-/// byte for byte: `W3ABDHQTU_CORPUS=dir cargo test corpus -- --ignored`.
+/// byte for byte, and goes through the text form unchanged: `W3ABDHQTU_CORPUS=dir cargo test corpus -- --ignored`.
 #[test]
 #[ignore]
 fn corpus() {

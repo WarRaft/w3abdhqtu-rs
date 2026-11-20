@@ -36,19 +36,19 @@ for object in &data.customs {
     }
 }
 assert_eq!(data.to_bytes()?, bytes);       // always the same bytes
+
+let text = data.to_text();                 // the text form, in BNI
+let back = w3abdhqtu_rs::from_text(&text);
+assert!(back.errors.is_empty());
+assert_eq!(back.data, Some(data));         // and back to the same data
 ```
 
-The CLI reads files, prints a summary (`-v`: every field) and checks that
-writing each one back gives the same bytes:
+The CLI:
 
 ```text
-$ w3abdhqtu-rs -v war3map.w3a
-war3map.w3a: version 2, 2 changed, 7 custom, 108 fields
-ACwe
-  arlv [0, 0] = 6
-  aret [0, 0] = "TRIGSTR_287"
-A000 : ANwm
-  aub1 [2, 0] = "TRIGSTR_165"
+w3abdhqtu-rs <file.w3?>...          check: read, write back, and through the text form
+w3abdhqtu-rs --text <file.w3?>      print the text form
+w3abdhqtu-rs --build <text> <out>   write the binary file from a text form
 ```
 
 ## Format
@@ -79,6 +79,58 @@ Abilities and upgrades always store `level` and `column`; doodads only
 since version 2. Version 1 doodads (Reign of Chaos campaign maps) go
 straight from the type to the value.
 
+## Text form
+
+The text form is [BNI](../bni-rs/README.md), so the BNI parser, its
+highlighting and its checks all apply; this crate reads the parsed
+document (`from_text`, or `from_bni` for one already parsed). It's what
+the [`wc3-rs`](../wc3-rs) editor shows and saves.
+
+```ini
+// Warcraft III abilities (war3map.w3a). Saving writes the binary file back.
+[w3a]
+version=2
+
+[ACwe]
+arlv=6
+aret="TRIGSTR_287",end 0x00000000
+
+[A000]
+_parent=ANwm
+anam="Blizzard"
+aub1[2]="Line one"\n"Line two"
+Hbz1[3].B=unreal 0.25,end A000
+```
+
+- **The file's section** comes first: `[w3a]` ... `[w3u]`, with
+  `version=` 1, 2 or 3.
+- **An object** is a section named by its id. A custom object has
+  `_parent=` its base; a changed standard object doesn't. Ids are four
+  letters, digits or `_`, or else `0x` and eight hex digits (the value
+  JASS gives `'hfoo'`).
+- **A field** is `id=value`. Abilities, upgrades and doodads (since
+  version 2) add `[level]` and the data column as `.A` for `Data A` (1)
+  ... `.Z`, or `.27` past that; 0s are left out.
+- **Values.** `500` is an integer; `1.5`, `1e-7`, `-0.0`, `inf` are
+  reals; `unreal 0.25` is an unreal; `"text"` is a string. A real whose
+  number can't say it exactly (a NaN with a payload) is written as its
+  bits: `real 0x7FC00001`.
+- **Strings.** BNI strings have no escapes and no line breaks, so what
+  they can't hold goes between quoted parts, unquoted: `\n` `\r` `\t` and
+  `\u{22}` for `"` (or any other character by its hex code). The parts
+  join into one string: `"a"\r\n"b"`.
+- **The `end` id.** Each field ends with an id the game doesn't read. The
+  World Editor mostly writes the base id in changed standard objects and
+  0 in custom ones; when a field has another, it's written after the
+  value: `,end A000`.
+- **Rare cases.** Sets (version 3) start with `_flags=` and their flags;
+  fields before the first one are in a set with flags 0. `_table=original`
+  or `_table=custom` puts an object in the other table than `_parent`
+  says. Real files have none of these but sets.
+- **Errors.** Every line with a problem is reported, with its place,
+  and there's data only when there are none.
+- Comments and spacing aren't kept: the binary file has no room for them.
+
 ## Data model
 
 `ObjectData { kind, version, originals, customs }` →
@@ -96,8 +148,8 @@ a string containing NUL.
 - Checked byte for byte on 311 files from 208 maps and a campaign
   (Blizzard's melee and campaign maps, custom maps). No version 3 file
   was among them; version 3 is covered by unit tests.
-- Not yet: field names, types and value checks from the metadata SLKs,
-  and the text form for editing in VS Code.
+- The text form reads back every one of them unchanged.
+- Not yet: field names, types and value checks from the metadata SLKs.
 
 ## Tests
 
@@ -106,5 +158,5 @@ cargo test
 W3ABDHQTU_CORPUS=path/to/files cargo test --lib corpus -- --ignored
 ```
 
-The corpus test reads every `.w3?` file in the folder and checks the
-round trip.
+The corpus test reads every `.w3?` file in the folder and checks both
+round trips: through the bytes and through the text form.
