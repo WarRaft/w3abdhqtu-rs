@@ -213,7 +213,7 @@ impl Metadata {
             }
         }
 
-        let rows = crate::slk::table(metadata);
+        let rows = rows(metadata);
         let Some((header, rows)) = rows.split_first() else {
             return Metadata::default();
         };
@@ -273,7 +273,7 @@ impl Metadata {
     /// Adds the standard objects' codes from the objects table
     /// ([`Kind::objects_file`]): its `alias` (the id) and `code` columns.
     pub fn with_codes(mut self, objects: &str) -> Metadata {
-        let rows = crate::slk::table(objects);
+        let rows = rows(objects);
         let Some((header, rows)) = rows.split_first() else {
             return self;
         };
@@ -369,6 +369,15 @@ impl Columns {
             units,
         })
     }
+}
+
+/// A table's rows, each its cells' text by column from the first, read
+/// with `slk-rs`; missing cells are empty.
+fn rows(text: &str) -> Vec<Vec<String>> {
+    let table = slk_rs::Table::new(&slk_rs::parse(text));
+    (1..=table.rows())
+        .map(|r| (1..=table.cols()).map(|c| table.text(r, c)).collect())
+        .collect()
 }
 
 fn cell(row: &[String], col: Option<usize>) -> Option<&str> {

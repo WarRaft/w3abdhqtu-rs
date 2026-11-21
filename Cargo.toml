@@ -16,3 +16,4 @@ path = "src/lib.rs"
 [dependencies]
 parser-rs = { path = "../parser-rs" }
 bni-rs = { path = "../bni-rs" }
+slk-rs = { path = "../slk-rs" }

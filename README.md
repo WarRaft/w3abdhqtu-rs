@@ -196,10 +196,8 @@ Version 1 doodads have no levels, so a variation is the id's last digit:
 `repeat` whose id ends in `1` names these too (`..., variation 2`),
 unless the table has a row of their own.
 
-The SLK reader (`slk.rs`) is only what these tables need: cell values by
-row and column, `;;` escapes, `X`/`Y` carried over from record to record;
-formats and formulas are skipped. Finding the files (archives, game
-folders) is the caller's job.
+The tables are read with [`slk-rs`](../slk-rs/README.md). Finding the
+files (archives, game folders) is the caller's job.
 
 ## Data model
 

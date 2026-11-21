@@ -27,7 +27,6 @@ mod data;
 mod kind;
 mod metadata;
 mod read;
-mod slk;
 mod text;
 mod write;
 
