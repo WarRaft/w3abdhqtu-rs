@@ -165,6 +165,9 @@ pub struct FieldMeta {
     /// ([`Metadata::keys`]). Empty for a field the table has no row of
     /// (`dvr2`, version 1 doodads' copies).
     pub key: String,
+    /// Which value of a list field it is (`index`: `Buttonpos` is X at 0,
+    /// Y at 1), when the table says.
+    pub index: Option<u32>,
     /// The metadata type: `int`, `unreal`, `targetList`, ...
     pub ty: String,
     /// How it's stored, when the type is known.
@@ -250,6 +253,7 @@ impl Metadata {
         let cols = Columns {
             display: column("displayName"),
             field: column("field"),
+            index: column("index"),
             ty: column("type"),
             min: column("minVal"),
             max: column("maxVal"),
@@ -349,8 +353,9 @@ impl Metadata {
     /// The keys the text form names an object's fields by: each field's
     /// [`FieldMeta::key`], for the fields an object of `kind` based on
     /// `base` has (an ability's by its code, items' and units' by their
-    /// table), when no other of its fields has the same key. The others
-    /// keep their ids.
+    /// table), when no other of its fields has the same key, or with its
+    /// `index` as a letter when that tells them apart (`ButtonposA`). The
+    /// others keep their ids.
     pub fn keys(&self, kind: Kind, base: Rawcode) -> Keys {
         let code = self.code(base);
         let has = |f: &FieldMeta| {
@@ -363,17 +368,40 @@ impl Metadata {
                     _ => true,
                 }
         };
-        let mut by_key: HashMap<&str, Vec<Rawcode>> = HashMap::new();
+        let mut by_key: HashMap<&str, Vec<(Rawcode, Option<u32>)>> = HashMap::new();
         for (&id, f) in &self.fields {
             if !f.key.is_empty() && has(f) {
-                by_key.entry(&f.key).or_default().push(id);
+                by_key.entry(&f.key).or_default().push((id, f.index));
+            }
+        }
+        // A name several fields share is told apart by their `index`, as a
+        // letter (`Buttonpos` at 0 and 1: `ButtonposA`, `ButtonposB`),
+        // when each has its own; else they keep their ids.
+        let mut named: HashMap<String, Vec<Rawcode>> = HashMap::new();
+        for (key, fields) in by_key {
+            if let [(id, _)] = fields[..] {
+                named.entry(key.to_string()).or_default().push(id);
+                continue;
+            }
+            let mut indexes: Vec<u32> = fields
+                .iter()
+                .filter_map(|f| f.1)
+                .filter(|&i| i < 26)
+                .collect();
+            indexes.sort();
+            indexes.dedup();
+            if indexes.len() == fields.len() {
+                for (id, index) in fields {
+                    let letter = (b'A' + index.expect("all have one") as u8) as char;
+                    named.entry(format!("{key}{letter}")).or_default().push(id);
+                }
             }
         }
         let mut keys = Keys::default();
-        for (key, ids) in by_key {
+        for (key, ids) in named {
             if let [id] = ids[..] {
-                keys.by_id.insert(id, key.to_string());
-                keys.by_key.insert(key.to_string(), id);
+                keys.by_id.insert(id, key.clone());
+                keys.by_key.insert(key, id);
             }
         }
         keys
@@ -401,6 +429,7 @@ impl Metadata {
 struct Columns {
     display: Option<usize>,
     field: Option<usize>,
+    index: Option<usize>,
     ty: Option<usize>,
     min: Option<usize>,
     max: Option<usize>,
@@ -442,6 +471,7 @@ impl Columns {
         Some(FieldMeta {
             name: name.to_string(),
             key,
+            index: cell(row, self.index).and_then(|i| i.parse().ok()),
             storage: Storage::of_type(&ty),
             ty,
             min: number(self.min),

@@ -122,9 +122,13 @@ abpx=1 // Button Position - Normal (X): int
   names its columns), when that names one field only among those the
   object has: an ability's by its code (`AIbz` has `AHbz`'s `DataA`, its
   `Hbz1`), items' and units' by their table (`HP` is `ihtp` in a `.w3t`,
-  `uhpm` in a `.w3u`). Fields that share a name (`abpx` and `abpy` are
-  both `Buttonpos`), have none, or sit in another data column keep their
-  ids; 97% of real maps' fields get a name. Abilities, upgrades and
+  `uhpm` in a `.w3u`). Fields that share a name are told apart by their
+  `index`, as a letter: `abpx` and `abpy` are `Buttonpos` at 0 and 1, so
+  `ButtonposA` and `ButtonposB`. Fields that share a name with no index to
+  tell them apart (`Cast`: `acas` and an ability's own), have none, or sit
+  in another data column keep their ids; 99% of real maps' fields get a
+  name (the rest: items in Reign of Chaos `.w3u` files, version 1
+  doodads' variations). Abilities, upgrades and
   doodads (since version 2) add `[level]`; an id adds its data column as
   `.A` for `Data A` (1) ... `.Z`, or `.27` past that; 0s are left out.
   Ids always read, names only with the metadata (`Metadata::keys`,

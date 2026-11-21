@@ -391,14 +391,24 @@ C;X1;Y4;K\"Hbz3\"\nC;X2;K\"real\"\nC;X3;K\"Area\"\n";
 /// Abilities' metadata with names from the tables' `field` column.
 fn named_abilities() -> Metadata {
     let rows: &[&[&str]] = &[
-        &["ID", "field", "type", "repeat", "data", "useSpecific"],
-        &["acdn", "Cool", "unreal", "4", "0", ""],
-        &["anam", "Name", "string", "0", "0", ""],
-        &["abpx", "Buttonpos", "int", "0", "0", ""],
-        &["abpy", "Buttonpos", "int", "0", "0", ""],
-        &["Hbz1", "Data", "int", "4", "1", "AHbz"],
-        &["Hbz2", "Data", "unreal", "4", "2", "AHbz"],
-        &["Oww1", "Data", "unreal", "4", "1", "AOww"],
+        &[
+            "ID",
+            "field",
+            "type",
+            "repeat",
+            "data",
+            "useSpecific",
+            "index",
+        ],
+        &["acdn", "Cool", "unreal", "4", "0", "", "-1"],
+        &["anam", "Name", "string", "0", "0", "", "0"],
+        &["abpx", "Buttonpos", "int", "0", "0", "", "0"],
+        &["abpy", "Buttonpos", "int", "0", "0", "", "1"],
+        &["acas", "Cast", "unreal", "4", "0", "", "-1"],
+        &["Hbz6", "Cast", "unreal", "4", "0", "AHbz", "-1"],
+        &["Hbz1", "Data", "int", "4", "1", "AHbz", "-1"],
+        &["Hbz2", "Data", "unreal", "4", "2", "AHbz", "-1"],
+        &["Oww1", "Data", "unreal", "4", "1", "AOww", "-1"],
     ];
     let mut slk = String::new();
     for (y, row) in rows.iter().enumerate() {
@@ -427,8 +437,11 @@ fn keys_are_the_tables_names() {
                 m(b"acdn", 1, 0, Value::Unreal(12.0), Rawcode::NONE),
                 m(b"Hbz1", 3, 1, Value::Int(5), Rawcode::NONE),
                 m(b"Hbz2", 3, 2, Value::Unreal(0.5), Rawcode::NONE),
-                // Two fields share `Buttonpos`: ids.
+                // Two fields share `Buttonpos`; their index tells them apart.
                 m(b"abpx", 0, 0, Value::Int(1), Rawcode::NONE),
+                m(b"abpy", 0, 0, Value::Int(2), Rawcode::NONE),
+                // Two share `Cast` and nothing tells them apart: ids.
+                m(b"acas", 1, 0, Value::Unreal(0.5), Rawcode::NONE),
                 // Not in its own column: its id and column.
                 m(b"Hbz1", 2, 3, Value::Int(7), Rawcode::NONE),
                 // Another ability's data: its id.
@@ -442,7 +455,9 @@ fn keys_are_the_tables_names() {
         "Cool[1]=12.0",
         "DataA[3]=5",
         "DataB[3]=0.5",
-        "abpx=1",
+        "ButtonposA=1",
+        "ButtonposB=2",
+        "acas[1]=0.5",
         "Hbz1[2].C=7",
         "Oww1[1].A=1.0",
     ] {
