@@ -114,40 +114,9 @@ pub(crate) fn real_text(v: f32) -> String {
     }
 }
 
-/// A string as BNI can hold it. BNI strings have no escapes and no line
-/// breaks, so what they can't hold goes between quoted parts, unquoted:
-/// `"Line one"\n"Line two"`. The value always starts with a quoted part.
+/// A string as BNI can hold it: [`bni_rs::string::quote`].
 pub fn string_text(s: &str) -> String {
-    let mut out = String::from("\"");
-    let mut quoted = true;
-    for c in s.chars() {
-        let escape = match c {
-            '\n' => Some("\\n".to_string()),
-            '\r' => Some("\\r".to_string()),
-            '\t' => Some("\\t".to_string()),
-            '"' => Some("\\u{22}".to_string()),
-            c if c.is_control() => Some(format!("\\u{{{:X}}}", c as u32)),
-            _ => None,
-        };
-        match (escape, quoted) {
-            (Some(e), true) => {
-                out += "\"";
-                out += &e;
-                quoted = false;
-            }
-            (Some(e), false) => out += &e,
-            (None, false) => {
-                out.push('"');
-                out.push(c);
-                quoted = true;
-            }
-            (None, true) => out.push(c),
-        }
-    }
-    if quoted {
-        out.push('"');
-    }
-    out
+    bni_rs::string::quote(s)
 }
 
 /// How a value is written for a field stored as `storage` (`None` when
@@ -867,48 +836,7 @@ const VALUE_FORM: &str = "expected a value: a number, or a \"string\" (`int`, `r
 
 /// Quoted parts as written; unquoted parts between them are escapes.
 fn string(field: &Field) -> Result<String, ParseError> {
-    let mut out = String::new();
-    for part in &field.parts {
-        match part.kind {
-            ValueKind::Quoted { closed: false } => {
-                return Err(error(part.span, "string isn't closed: `\"` missing"));
-            }
-            ValueKind::Quoted { closed: true } => out += &part.text,
-            _ => unescape(&part.text, &mut out).map_err(|m| error(part.span, m))?,
-        }
-    }
-    Ok(out)
-}
-
-fn unescape(text: &str, out: &mut String) -> Result<(), String> {
-    const FORM: &str = "between quoted parts only escapes: \\n \\r \\t or \\u{...}";
-    let mut rest = text;
-    while !rest.is_empty() {
-        let after = rest.strip_prefix('\\').ok_or(FORM)?;
-        let (c, next) = match after.as_bytes().first() {
-            Some(b'n') => ('\n', &after[1..]),
-            Some(b'r') => ('\r', &after[1..]),
-            Some(b't') => ('\t', &after[1..]),
-            Some(b'u') => {
-                let (hex, next) = after[1..]
-                    .strip_prefix('{')
-                    .and_then(|h| h.split_once('}'))
-                    .ok_or(FORM)?;
-                let c = u32::from_str_radix(hex, 16)
-                    .ok()
-                    .and_then(char::from_u32)
-                    .filter(|&c| c != '\0');
-                (
-                    c.ok_or("\\u{...} takes a character's hex code, not 0")?,
-                    next,
-                )
-            }
-            _ => return Err(FORM.into()),
-        };
-        out.push(c);
-        rest = next;
-    }
-    Ok(())
+    bni_rs::string::unquote(field)
 }
 
 /// A real written as a number, or as `0x` and its bits.
