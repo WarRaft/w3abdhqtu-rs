@@ -234,7 +234,7 @@ fn every_error_is_reported() {
             (6, 6, "string isn't closed: `\"` missing".into()),
             (9, 1, "fields of units have no level or data column".into()),
             (10, 1, "sets need format version 3; this is version 2".into()),
-            (11, 1, "expected a field id: four letters, digits or `_`, or 0x and eight hex digits".into()),
+            (11, 1, "expected a field: its name or id (four letters, digits or `_`, or 0x and eight hex digits)".into()),
             (12, 9, "between quoted parts only escapes: \\n \\r \\t or \\u{...}".into()),
             (13, 8, "expected only the value; a string with a comma is quoted".into()),
         ]
@@ -309,7 +309,9 @@ fn field_names_as_comments() {
 fn fields_under_the_cursor() {
     let doc =
         bni_rs::parse("[w3a]\nversion=2\n[A000]\nHbz1[2].A=oops\n_parent=AHbz\n[ACwe]\n  arlv=6\n");
-    let at = |line, col| field_at(&doc, line, col).map(|f| (f.field, f.object, f.base));
+    let at = |line, col| {
+        field_at(&doc, line, col, &Metadata::default()).map(|f| (f.field, f.object, f.base))
+    };
     let (hbz1, a000, ahbz) = (Rawcode(*b"Hbz1"), Rawcode(*b"A000"), Rawcode(*b"AHbz"));
     // Anywhere on the key, to its end; a broken value doesn't matter, nor
     // where `_parent` is.
@@ -322,8 +324,19 @@ fn fields_under_the_cursor() {
     assert_eq!(at(7, 1), Some((Rawcode(*b"arlv"), acwe, acwe)));
     // Not on a key, or not object text.
     assert_eq!(at(2, 1), None);
-    assert_eq!(field_at(&bni_rs::parse("[a]\n[b]\nx=1\n"), 3, 1), None);
-    assert_eq!(field_at(&doc, 4, 1).unwrap().kind, Kind::Ability);
+    assert_eq!(
+        field_at(
+            &bni_rs::parse("[a]\n[b]\nx=1\n"),
+            3,
+            1,
+            &Metadata::default()
+        ),
+        None
+    );
+    assert_eq!(
+        field_at(&doc, 4, 1, &Metadata::default()).unwrap().kind,
+        Kind::Ability
+    );
 }
 
 #[test]
@@ -373,4 +386,130 @@ C;X1;Y4;K\"Hbz3\"\nC;X2;K\"real\"\nC;X3;K\"Area\"\n";
     };
     assert_eq!(value(&meta), Value::Unreal(25.0));
     assert_eq!(value(&Metadata::default()), Value::Int(25));
+}
+
+/// Abilities' metadata with names from the tables' `field` column.
+fn named_abilities() -> Metadata {
+    let rows: &[&[&str]] = &[
+        &["ID", "field", "type", "repeat", "data", "useSpecific"],
+        &["acdn", "Cool", "unreal", "4", "0", ""],
+        &["anam", "Name", "string", "0", "0", ""],
+        &["abpx", "Buttonpos", "int", "0", "0", ""],
+        &["abpy", "Buttonpos", "int", "0", "0", ""],
+        &["Hbz1", "Data", "int", "4", "1", "AHbz"],
+        &["Hbz2", "Data", "unreal", "4", "2", "AHbz"],
+        &["Oww1", "Data", "unreal", "4", "1", "AOww"],
+    ];
+    let mut slk = String::new();
+    for (y, row) in rows.iter().enumerate() {
+        for (x, cell) in row.iter().enumerate() {
+            if !cell.is_empty() {
+                slk += &format!("C;X{};Y{};K\"{cell}\"\n", x + 1, y + 1);
+            }
+        }
+    }
+    let codes = "C;X1;Y1;K\"alias\"\nC;X2;K\"code\"\nC;X1;Y2;K\"AIbz\"\nC;X2;K\"AHbz\"\n";
+    Metadata::from_tables(&slk, &[]).with_codes(codes)
+}
+
+#[test]
+fn keys_are_the_tables_names() {
+    let meta = named_abilities();
+    let id = Rawcode(*b"A000");
+    let d = data(
+        Kind::Ability,
+        2,
+        vec![],
+        vec![object(
+            b"AIbz",
+            id,
+            vec![
+                m(b"acdn", 1, 0, Value::Unreal(12.0), Rawcode::NONE),
+                m(b"Hbz1", 3, 1, Value::Int(5), Rawcode::NONE),
+                m(b"Hbz2", 3, 2, Value::Unreal(0.5), Rawcode::NONE),
+                // Two fields share `Buttonpos`: ids.
+                m(b"abpx", 0, 0, Value::Int(1), Rawcode::NONE),
+                // Not in its own column: its id and column.
+                m(b"Hbz1", 2, 3, Value::Int(7), Rawcode::NONE),
+                // Another ability's data: its id.
+                m(b"Oww1", 1, 1, Value::Unreal(1.0), Rawcode::NONE),
+            ],
+        )],
+    );
+    let text = round_trip_with(&d, &meta);
+    // AIbz has AHbz's data, by its code: `DataA` is Hbz1 there.
+    for line in [
+        "Cool[1]=12.0",
+        "DataA[3]=5",
+        "DataB[3]=0.5",
+        "abpx=1",
+        "Hbz1[2].C=7",
+        "Oww1[1].A=1.0",
+    ] {
+        assert!(
+            text.lines()
+                .any(|l| l.starts_with(&format!("{line} //")) || l == line),
+            "{line}\n{text}"
+        );
+    }
+    // Ids still read.
+    let by_id = "[w3a]\nversion=2\n[A000]\n_parent=AHbz\nHbz1[3].A=5\nDataA[2]=6\nCool=1.0\n";
+    let read = from_text(by_id, &meta);
+    let mods = &read.data.unwrap().customs[0].sets[0].mods;
+    assert_eq!((mods[0].field, mods[0].column), (Rawcode(*b"Hbz1"), 1));
+    assert_eq!(
+        (mods[1].field, mods[1].level, mods[1].column),
+        (Rawcode(*b"Hbz1"), 2, 1)
+    );
+    assert_eq!(
+        (mods[2].field, mods[2].value.clone()),
+        (Rawcode(*b"acdn"), Value::Unreal(1.0))
+    );
+    // Hovers read names too.
+    let doc = bni_rs::parse(by_id);
+    assert_eq!(
+        field_at(&doc, 6, 1, &meta).map(|f| f.field),
+        Some(Rawcode(*b"Hbz1"))
+    );
+}
+
+#[test]
+fn hints_instead_of_comments() {
+    let meta = named_abilities();
+    let id = Rawcode(*b"A000");
+    let d = data(
+        Kind::Ability,
+        2,
+        vec![],
+        vec![object(
+            b"AHbz",
+            id,
+            vec![
+                m(b"anam", 0, 0, Value::Str("Storm".into()), Rawcode::NONE),
+                m(b"acdn", 1, 0, Value::Unreal(12.0), Rawcode::NONE),
+                m(b"Hbz1", 3, 1, Value::Int(5), Rawcode::NONE),
+            ],
+        )],
+    );
+    // Names and plain numbers, but no comments: the editor shows those.
+    let text = d.to_text_with(&meta, false);
+    assert!(
+        text.ends_with("[A000]\n_parent=AHbz\nName=\"Storm\"\nCool[1]=12.0\nDataA[3]=5\n"),
+        "{text}"
+    );
+    let doc = bni_rs::parse(&text);
+    let hints = |first, last| -> Vec<(usize, usize, String)> {
+        field_hints(&doc, &meta, first, last)
+            .into_iter()
+            .map(|h| (h.line, h.col, h.label))
+            .collect()
+    };
+    // Only the lines asked for; after the value.
+    assert_eq!(
+        hints(8, 9),
+        vec![(8, 13, "Cool: unreal".into()), (9, 11, "Data: int".into())]
+    );
+    assert_eq!(hints(7, 7), vec![(7, 13, "Name: string".into())]);
+    assert_eq!(hints(1, 5), vec![]);
+    assert!(field_hints(&doc, &Metadata::default(), 1, 100).is_empty());
 }

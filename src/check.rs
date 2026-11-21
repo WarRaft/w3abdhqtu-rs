@@ -7,7 +7,7 @@
 use parser_rs::{Diagnostic, Edit, Fix, Rawcode, rule};
 
 use crate::metadata::{FieldMeta, Storage};
-use crate::text::{FieldAt, key_text, real_text, value_text};
+use crate::text::{FieldAt, field_key, real_text, value_text};
 use crate::{Kind, Metadata, Mod, Parsed, Value, id_text};
 
 /// What's wrong with the fields of `parsed` (what [`crate::from_bni`]
@@ -45,7 +45,7 @@ pub fn check(parsed: &Parsed, meta: &Metadata) -> Vec<Diagnostic> {
             out.push(d);
         }
         if levels {
-            out.extend(level(kind, at, field, &what));
+            out.extend(level(kind, meta, at, field, &what));
         }
         out.extend(owner(kind, meta, at, field, &what));
     }
@@ -135,7 +135,13 @@ fn limit(v: f64) -> String {
 
 /// The level and data column fit the field. Only for kinds whose fields
 /// have them (`Kind::has_levels`).
-fn level(kind: Kind, at: &FieldAt, field: &FieldMeta, what: &str) -> Option<Diagnostic> {
+fn level(
+    kind: Kind,
+    meta: &Metadata,
+    at: &FieldAt,
+    field: &FieldMeta,
+    what: &str,
+) -> Option<Diagnostic> {
     let m = &at.field;
     // Only abilities have data columns.
     let column = if kind == Kind::Ability {
@@ -164,7 +170,8 @@ fn level(kind: Kind, at: &FieldAt, field: &FieldMeta, what: &str) -> Option<Diag
         column,
         ..m.clone()
     };
-    let key = key_text(&fixed);
+    // As the text writes it: by its name where it has one.
+    let key = field_key(&fixed, kind, meta, &meta.keys(kind, at.base));
     Some(
         Diagnostic::warning(rule::OBJECT_FIELD_LEVEL, message, at.key.start_line)
             .at(at.key)

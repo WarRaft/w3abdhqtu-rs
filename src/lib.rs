@@ -33,11 +33,12 @@ mod write;
 pub use check::check;
 pub use data::{Mod, Object, ObjectData, Set, Value};
 pub use kind::Kind;
-pub use metadata::{FieldMeta, Metadata, STRINGS_FILES, Storage};
+pub use metadata::{FieldMeta, Keys, Metadata, STRINGS_FILES, Storage};
 pub use parser_rs::{BinError, BinResult, Rawcode};
 pub use read::parse;
 pub use text::{
-    FieldAt, FieldRef, Parsed, field_at, from_bni, from_text, id_text, is_object_text, string_text,
+    FieldAt, FieldRef, Hint, Parsed, field_at, field_hints, field_key, from_bni, from_text,
+    id_text, is_object_text, string_text,
 };
 
 /// The format versions this crate reads and writes.

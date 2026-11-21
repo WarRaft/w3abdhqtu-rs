@@ -24,7 +24,7 @@
 use bni_rs::ast::{Field, Item, Section, ValueKind};
 use parser_rs::{ParseError, Rawcode, Span};
 
-use crate::{Kind, Metadata, Mod, Object, ObjectData, Set, Storage, Value};
+use crate::{FieldMeta, Keys, Kind, Metadata, Mod, Object, ObjectData, Set, Storage, Value};
 
 impl Kind {
     /// What the file holds, in words.
@@ -65,17 +65,40 @@ pub fn id_text(code: Rawcode) -> String {
 
 /// The key of a field: its id, then `[level]` and `.column` when not 0
 /// (`Hbz1[3].B`).
-pub(crate) fn key_text(m: &Mod) -> String {
-    let mut out = id_text(m.field);
+/// A field's key in an object's text: the field's name in the game's
+/// tables when `keys` (the object's, [`Metadata::keys`]) has one and the
+/// field is in its own data column (`DataA[3]`, `Cool[1]`, `HP`); else its
+/// id, then `[level]` and `.column` when not 0 (`Hbz1[3].B`).
+pub fn field_key(m: &Mod, kind: Kind, meta: &Metadata, keys: &Keys) -> String {
+    let column = own_column(kind, meta, m.field);
+    let name = keys.key(m.field).filter(|_| m.column == column);
+    let mut out = match name {
+        Some(name) => name.to_string(),
+        // An id that reads as one of the keys says it in hex.
+        None if keys.field(&id_text(m.field)).is_some() => format!("0x{:08X}", m.field.to_int()),
+        None => id_text(m.field),
+    };
     if m.level != 0 {
         out += &format!("[{}]", m.level);
     }
-    match m.column {
-        0 => {}
-        c @ 1..=26 => out += &format!(".{}", (b'A' + (c - 1) as u8) as char),
-        c => out += &format!(".{c}"),
+    if name.is_none() {
+        match m.column {
+            0 => {}
+            c @ 1..=26 => out += &format!(".{}", (b'A' + (c - 1) as u8) as char),
+            c => out += &format!(".{c}"),
+        }
     }
     out
+}
+
+/// The data column a field of `kind` is in: its own for an ability's data,
+/// else none.
+fn own_column(kind: Kind, meta: &Metadata, field: Rawcode) -> u32 {
+    if kind == Kind::Ability {
+        meta.get(field).map_or(0, |f| f.column)
+    } else {
+        0
+    }
 }
 
 pub(crate) fn real_text(v: f32) -> String {
@@ -170,6 +193,15 @@ impl ObjectData {
     /// its type is its field's (`Hbz2[1].B=0.25`, an unreal): read it back
     /// with the same `meta`.
     pub fn to_text_named(&self, meta: &Metadata) -> String {
+        self.to_text_with(meta, true)
+    }
+
+    /// The text form with `meta`: keys by name, numbers plain in their
+    /// field's type, and, with `comments`, each field's name and type
+    /// after it. An editor that shows those itself (as inlay hints,
+    /// [`field_hints`]) leaves them out, so they aren't part of the text
+    /// to edit.
+    pub fn to_text_with(&self, meta: &Metadata, comments: bool) -> String {
         let ext = self.kind.extension();
         let mut out = format!(
             "// Warcraft III {} (war3map.{ext}). Saving writes the binary file back.\n[{ext}]\nversion={}\n",
@@ -179,13 +211,20 @@ impl ObjectData {
         for (original, table) in [(true, &self.originals), (false, &self.customs)] {
             for object in table {
                 out.push('\n');
-                self.object_text(&mut out, meta, original, object);
+                self.object_text(&mut out, meta, comments, original, object);
             }
         }
         out
     }
 
-    fn object_text(&self, out: &mut String, meta: &Metadata, original: bool, object: &Object) {
+    fn object_text(
+        &self,
+        out: &mut String,
+        meta: &Metadata,
+        comments: bool,
+        original: bool,
+        object: &Object,
+    ) {
         let custom = !original;
         let shown = if custom || !object.id.is_none() {
             object.id
@@ -202,6 +241,7 @@ impl ObjectData {
             *out += &format!("{TABLE}=original\n");
         }
 
+        let keys = meta.keys(self.kind, object.base);
         for (i, set) in object.sets.iter().enumerate() {
             let implicit = i == 0 && set.flags == 0 && (self.version < 3 || !set.mods.is_empty());
             if !implicit {
@@ -209,11 +249,13 @@ impl ObjectData {
             }
             for m in &set.mods {
                 let storage = meta.get(m.field).and_then(|f| f.storage);
-                *out += &format!("{}={}", key_text(m), value_text(&m.value, storage));
-                match meta.get(m.field) {
-                    Some(f) if f.ty.is_empty() => *out += &format!(" // {}", f.name),
-                    Some(f) => *out += &format!(" // {}: {}", f.name, f.ty),
-                    None => {}
+                *out += &format!(
+                    "{}={}",
+                    field_key(m, self.kind, meta, &keys),
+                    value_text(&m.value, storage)
+                );
+                if let Some(label) = meta.get(m.field).filter(|_| comments).map(label) {
+                    *out += &format!(" // {label}");
                 }
                 out.push('\n');
             }
@@ -394,10 +436,94 @@ fn header(section: &Section, errors: &mut Vec<ParseError>) -> u32 {
     })
 }
 
+/// What's said about a field next to it: its name and type,
+/// `Cooldown: unreal`.
+fn label(f: &FieldMeta) -> String {
+    if f.ty.is_empty() {
+        f.name.clone()
+    } else {
+        format!("{}: {}", f.name, f.ty)
+    }
+}
+
+/// A field's name and type to show after its line, for an editor's inlay
+/// hints ([`field_hints`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hint {
+    /// Where it goes: the line (1-based) and the column just past the
+    /// field's value (1-based, in characters, as BNI spans count).
+    pub line: usize,
+    pub col: usize,
+    /// `Cooldown: unreal`.
+    pub label: String,
+}
+
+/// The hints of the fields on lines `first..=last` (1-based) of a text
+/// form: each field's name and type from `meta`, after its value. Only
+/// those lines are worked out, so an editor asks for what's in view.
+pub fn field_hints(
+    doc: &bni_rs::Document,
+    meta: &Metadata,
+    first: usize,
+    last: usize,
+) -> Vec<Hint> {
+    let mut out = Vec::new();
+    if meta.is_empty() {
+        return out;
+    }
+    let Some((head, objects)) = doc.sections.split_first() else {
+        return out;
+    };
+    let Some(kind) = Kind::from_extension(&head.name.text) else {
+        return out;
+    };
+    for section in objects {
+        let lines = section.line
+            ..=section
+                .items
+                .iter()
+                .map(|i| i.line)
+                .max()
+                .unwrap_or(section.line);
+        if *lines.end() < first || *lines.start() > last {
+            continue;
+        }
+        let named = parse_id(section.name.text.trim());
+        let parent = section.items.iter().find_map(|i| {
+            let key = i.key.as_ref()?;
+            (key.text.trim() == PARENT).then(|| parse_id(i.fields.first()?.text().trim()))?
+        });
+        let keys = meta.keys(kind, parent.or(named).unwrap_or(Rawcode::NONE));
+        for item in section
+            .items
+            .iter()
+            .filter(|i| (first..=last).contains(&i.line))
+        {
+            let Some(key) = &item.key else { continue };
+            let Ok((field, ..)) = parse_key(key.text.trim(), kind, meta, &keys) else {
+                continue;
+            };
+            let Some(f) = meta.get(field) else { continue };
+            let end = item.fields.last().map_or(item.eq, |f| f.span);
+            out.push(Hint {
+                line: end.end_line,
+                col: end.end_col,
+                label: label(f),
+            });
+        }
+    }
+    out
+}
+
 /// The field whose key is at `line`, `col` (1-indexed, columns in
 /// characters, as BNI spans count), for a hover: [`FieldRef`]. Read from
 /// the key alone, so its value may be anything, even broken.
-pub fn field_at(doc: &bni_rs::Document, line: usize, col: usize) -> Option<FieldRef> {
+pub fn field_at(
+    doc: &bni_rs::Document,
+    line: usize,
+    col: usize,
+    meta: &Metadata,
+) -> Option<FieldRef> {
     let (head, objects) = doc.sections.split_first()?;
     let kind = Kind::from_extension(&head.name.text)?;
     for section in objects {
@@ -407,20 +533,20 @@ pub fn field_at(doc: &bni_rs::Document, line: usize, col: usize) -> Option<Field
             if span.start_line != line || col < span.start_col || col > span.end_col {
                 continue;
             }
-            let text = key.text.trim();
-            let id = text.split(['[', '.']).next().unwrap_or(text);
-            let field = parse_id(id)?;
             let named = parse_id(section.name.text.trim());
             let parent = section.items.iter().find_map(|i| {
                 let key = i.key.as_ref()?;
                 (key.text.trim() == PARENT).then(|| parse_id(i.fields.first()?.text().trim()))?
             });
+            let base = parent.or(named).unwrap_or(Rawcode::NONE);
+            let (field, ..) =
+                parse_key(key.text.trim(), kind, meta, &meta.keys(kind, base)).ok()?;
             return Some(FieldRef {
                 kind,
                 field,
                 key: span,
                 object: named.unwrap_or(Rawcode::NONE),
-                base: parent.or(named).unwrap_or(Rawcode::NONE),
+                base,
             });
         }
     }
@@ -515,6 +641,7 @@ fn object(
         id,
         sets: Vec::new(),
     };
+    let keys = meta.keys(kind, base);
     for item in &section.items {
         let Some(key) = &item.key else {
             errors.push(error(item.eq, "expected a field id before `=`"));
@@ -545,7 +672,7 @@ fn object(
                 }
             }
             _ => {
-                if let Some((m, value)) = field(item, key, kind, version, meta, errors) {
+                if let Some((m, value)) = field(item, key, kind, version, meta, &keys, errors) {
                     fields.push(FieldAt {
                         base,
                         field: m.clone(),
@@ -573,10 +700,27 @@ fn object(
 }
 
 /// `Hbz1[3].B` → the field, its level and its column.
-fn parse_key(text: &str) -> Result<(Rawcode, u32, u32, bool), String> {
-    let id_len = if text.starts_with("0x") { 10 } else { 4 };
-    let (id, mut rest) = text.split_at(id_len.min(text.len()));
-    let field = parse_id(id).ok_or(format!("expected a field id: {ID_FORM}"))?;
+/// `DataA[3]` or `Hbz1[3].A` → the field, its level and its column (a
+/// key from the game's tables is in its own column) and whether a level
+/// or column is given.
+fn parse_key(
+    text: &str,
+    kind: Kind,
+    meta: &Metadata,
+    keys: &Keys,
+) -> Result<(Rawcode, u32, u32, bool), String> {
+    let name_len = text.find(['[', '.']).unwrap_or(text.len());
+    let named = keys.field(&text[..name_len]);
+    let (field, mut rest) = match named {
+        Some(field) => (field, &text[name_len..]),
+        None => {
+            let id_len = if text.starts_with("0x") { 10 } else { 4 };
+            let (id, rest) = text.split_at(id_len.min(text.len()));
+            let field =
+                parse_id(id).ok_or(format!("expected a field: its name or id ({ID_FORM})"))?;
+            (field, rest)
+        }
+    };
     let mut addressed = false;
     let mut level = 0;
     if let Some(after) = rest.strip_prefix('[') {
@@ -590,7 +734,11 @@ fn parse_key(text: &str) -> Result<(Rawcode, u32, u32, bool), String> {
         rest = after;
         addressed = true;
     }
-    let mut column = 0;
+    let mut column = if named.is_some() {
+        own_column(kind, meta, field)
+    } else {
+        0
+    };
     if let Some(c) = rest.strip_prefix('.') {
         column = match c.as_bytes() {
             [c @ b'A'..=b'Z'] => (c - b'A' + 1) as u32,
@@ -602,7 +750,7 @@ fn parse_key(text: &str) -> Result<(Rawcode, u32, u32, bool), String> {
         addressed = true;
     }
     if !rest.is_empty() {
-        return Err("expected `[level]` or `.column` after the field id".into());
+        return Err("expected `[level]` or `.column` after the field".into());
     }
     Ok((field, level, column, addressed))
 }
@@ -613,9 +761,10 @@ fn field(
     kind: Kind,
     version: u32,
     meta: &Metadata,
+    keys: &Keys,
     errors: &mut Vec<ParseError>,
 ) -> Option<(Mod, Span)> {
-    let (field, level, column, addressed) = match parse_key(key.text.trim()) {
+    let (field, level, column, addressed) = match parse_key(key.text.trim(), kind, meta, keys) {
         Ok(parts) => parts,
         Err(message) => {
             errors.push(error(key.span, message));

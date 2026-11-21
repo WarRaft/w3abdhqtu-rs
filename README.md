@@ -97,15 +97,17 @@ the [`wc3-rs`](../wc3-rs) editor shows and saves.
 version=2
 
 [ACwe]
-arlv=6 // Required Level: int
-aret="TRIGSTR_287" // Tooltip - Learn: string
+reqLevel=6 // Required Level: int
+Researchtip="TRIGSTR_287" // Tooltip - Learn: string
 
 [A000]
 _parent=AHbz
-anam="Blizzard" // Name: string
-aub1[2]="Line one"\n"Line two" // Tooltip - Normal - Extended: string
-Hbz1[3].A=12 // Number of Waves: int
-Hbz2[3].B=0.25 // Damage: unreal
+Name="Blizzard" // Name: string
+Ubertip[2]="Line one"\n"Line two" // Tooltip - Normal - Extended: string
+DataA[3]=12 // Number of Waves: int
+DataB[3]=0.25 // Damage: unreal
+Cool[3]=6.0 // Cooldown: unreal
+abpx=1 // Button Position - Normal (X): int
 ```
 
 - **The file's section** comes first: `[w3a]` ... `[w3u]`, with
@@ -114,9 +116,19 @@ Hbz2[3].B=0.25 // Damage: unreal
   `_parent=` its base; a changed standard object doesn't. Ids are four
   letters, digits or `_`, or else `0x` and eight hex digits (the value
   JASS gives `'hfoo'`).
-- **A field** is `id=value`. Abilities, upgrades and doodads (since
-  version 2) add `[level]` and the data column as `.A` for `Data A` (1)
-  ... `.Z`, or `.27` past that; 0s are left out.
+- **A field** is `key=value`. The key is the field's name in the game's
+  data tables, the metadata's `field` column (`Cool`, `HP`, `Name`), with
+  an ability's data column as a letter (`DataA`, as `AbilityData.slk`
+  names its columns), when that names one field only among those the
+  object has: an ability's by its code (`AIbz` has `AHbz`'s `DataA`, its
+  `Hbz1`), items' and units' by their table (`HP` is `ihtp` in a `.w3t`,
+  `uhpm` in a `.w3u`). Fields that share a name (`abpx` and `abpy` are
+  both `Buttonpos`), have none, or sit in another data column keep their
+  ids; 97% of real maps' fields get a name. Abilities, upgrades and
+  doodads (since version 2) add `[level]`; an id adds its data column as
+  `.A` for `Data A` (1) ... `.Z`, or `.27` past that; 0s are left out.
+  Ids always read, names only with the metadata (`Metadata::keys`,
+  `field_key`).
 - **Values.** `"text"` is a string, anything else a number of the field's
   type, from the game's metadata (`from_text(text, &meta)`): `Hbz2` is an
   unreal, so `Hbz2[3].B=0.25` is one; the comment and the editor's hover
@@ -144,7 +156,10 @@ Hbz2[3].B=0.25 // Damage: unreal
 - **Field names and types** (`to_text_named`) are comments after the
   fields: the names World Editor shows and the metadata types. They're
   only for reading, and come from the game's files (below); without them
-  the text is the same minus the comments.
+  the text is the same minus the comments. An editor shows them as inlay
+  hints instead, outside the text: `to_text_with(meta, false)` leaves the
+  comments out, and `field_hints(doc, meta, first, last)` gives the hints
+  of just the lines in view.
 - Comments and spacing aren't kept: the binary file has no room for them.
 
 ## Metadata

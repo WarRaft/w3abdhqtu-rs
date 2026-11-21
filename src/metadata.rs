@@ -158,6 +158,13 @@ impl Storage {
 pub struct FieldMeta {
     /// The name World Editor shows.
     pub name: String,
+    /// The name the game's data tables give the field: the `field` column
+    /// (`Cool`, `HP`), with the data column's letter for an ability's data
+    /// (`DataA`, the column `AbilityData.slk` keeps it in). The text form
+    /// writes it as the field's key where it names one field only
+    /// ([`Metadata::keys`]). Empty for a field the table has no row of
+    /// (`dvr2`, version 1 doodads' copies).
+    pub key: String,
     /// The metadata type: `int`, `unreal`, `targetList`, ...
     pub ty: String,
     /// How it's stored, when the type is known.
@@ -177,6 +184,25 @@ pub struct FieldMeta {
     /// heroes or buildings do. `None` when the table doesn't say.
     pub items: Option<bool>,
     pub units: Option<bool>,
+}
+
+/// An object's fields by key and keys by field ([`Metadata::keys`]).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Keys {
+    by_id: HashMap<Rawcode, String>,
+    by_key: HashMap<String, Rawcode>,
+}
+
+impl Keys {
+    /// The key that names `field`, if one does.
+    pub fn key(&self, field: Rawcode) -> Option<&str> {
+        self.by_id.get(&field).map(String::as_str)
+    }
+
+    /// The field a key names.
+    pub fn field(&self, key: &str) -> Option<Rawcode> {
+        self.by_key.get(key).copied()
+    }
 }
 
 /// A kind's fields by id. Empty when the game's files aren't at hand.
@@ -260,6 +286,7 @@ impl Metadata {
                 id[3] = b'0' + n % 10;
                 fields.entry(Rawcode(id)).or_insert_with(|| FieldMeta {
                     name: format!("{}, variation {n}", meta.name),
+                    key: String::new(),
                     ..meta.clone()
                 });
             }
@@ -319,6 +346,39 @@ impl Metadata {
         }
     }
 
+    /// The keys the text form names an object's fields by: each field's
+    /// [`FieldMeta::key`], for the fields an object of `kind` based on
+    /// `base` has (an ability's by its code, items' and units' by their
+    /// table), when no other of its fields has the same key. The others
+    /// keep their ids.
+    pub fn keys(&self, kind: Kind, base: Rawcode) -> Keys {
+        let code = self.code(base);
+        let has = |f: &FieldMeta| {
+            let named = |ids: &[Rawcode]| ids.contains(&base) || ids.contains(&code);
+            (f.specific.is_empty() || named(&f.specific))
+                && !named(&f.not_specific)
+                && match kind {
+                    Kind::Item => f.items != Some(false),
+                    Kind::Unit => f.units != Some(false),
+                    _ => true,
+                }
+        };
+        let mut by_key: HashMap<&str, Vec<Rawcode>> = HashMap::new();
+        for (&id, f) in &self.fields {
+            if !f.key.is_empty() && has(f) {
+                by_key.entry(&f.key).or_default().push(id);
+            }
+        }
+        let mut keys = Keys::default();
+        for (key, ids) in by_key {
+            if let [id] = ids[..] {
+                keys.by_id.insert(id, key.to_string());
+                keys.by_key.insert(key.to_string(), id);
+            }
+        }
+        keys
+    }
+
     pub fn get(&self, field: Rawcode) -> Option<&FieldMeta> {
         self.fields.get(&field)
     }
@@ -374,14 +434,20 @@ impl Columns {
             .iter()
             .filter_map(|&c| flag(c))
             .reduce(|a, b| a || b);
+        let column = number(self.data).map_or(0, |d| d as u32);
+        let mut key = cell(row, self.field).unwrap_or("").to_string();
+        if (1..=26).contains(&column) {
+            key.push((b'A' + (column - 1) as u8) as char);
+        }
         Some(FieldMeta {
             name: name.to_string(),
+            key,
             storage: Storage::of_type(&ty),
             ty,
             min: number(self.min),
             max: number(self.max),
             levels: number(self.repeat).is_some_and(|r| r > 0.0),
-            column: number(self.data).map_or(0, |d| d as u32),
+            column,
             specific: ids(self.specific),
             not_specific: ids(self.not_specific),
             items: flag(self.items),

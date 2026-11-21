@@ -29,10 +29,10 @@ fn abilities() -> Metadata {
         &["anam", "Name", "string", "", "TTName", "0", "0", ""],
         &["aher", "hero", "bool", "", "", "0", "0", ""],
         &["acdn", "Cool", "unreal", "0", "300", "4", "0", ""],
-        &["Hbz1", "DataA", "int", "1", "99999", "4", "1", "AHbz,ACbz"],
+        &["Hbz1", "Data", "int", "1", "99999", "4", "1", "AHbz,ACbz"],
         &[
             "Hbz2",
-            "DataB",
+            "Data",
             "unreal",
             "1",
             "99999",
@@ -123,7 +123,7 @@ fn ranges() {
                 4,
                 11,
                 rule::OBJECT_VALUE_RANGE,
-                "`Hbz1` (DataA) is below World Editor's minimum, 1".into()
+                "`Hbz1` (Data) is below World Editor's minimum, 1".into()
             ),
             (
                 5,
@@ -153,21 +153,21 @@ fn levels_and_columns() {
     assert_eq!(
         found,
         vec![
-            (4, "`anam` (Name) has no levels".into(), "anam".into()),
+            (4, "`anam` (Name) has no levels".into(), "Name".into()),
             (
                 5,
                 "`acdn` (Cool) has a value per level; level 0 isn't one".into(),
-                "acdn[1]".into()
+                "Cool[1]".into()
             ),
             (
                 6,
-                "`Hbz1` (DataA) is in data column A".into(),
-                "Hbz1[1].A".into()
+                "`Hbz1` (Data) is in data column A".into(),
+                "DataA[1]".into()
             ),
             (
                 7,
-                "`Hbz2` (DataB) is in data column B".into(),
-                "Hbz2[1].B".into()
+                "`Hbz2` (Data) is in data column B".into(),
+                "DataB[1]".into()
             ),
         ]
     );
@@ -184,7 +184,7 @@ fn owners_and_unknown_fields() {
                 5,
                 1,
                 rule::OBJECT_FIELD_OWNER,
-                "`Hbz1` (DataA) is a field of AHbz, ACbz, not of AHtb".into()
+                "`Hbz1` (Data) is a field of AHbz, ACbz, not of AHtb".into()
             ),
             (
                 10,
