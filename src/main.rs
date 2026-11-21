@@ -3,7 +3,7 @@
 
 use std::process::ExitCode;
 
-use w3abdhqtu_rs::{Kind, Metadata, STRINGS_FILES, from_text, parse};
+use w3abdhqtu_rs::{Kind, Metadata, from_text, parse};
 
 fn usage() {
     eprintln!(
@@ -99,17 +99,7 @@ fn names(game: &str, kind: Kind) -> Metadata {
         let bytes = std::fs::read(&path).ok()?;
         Some(String::from_utf8_lossy(&bytes).into_owned())
     };
-    let Some(metadata) = read(kind.metadata_file()) else {
-        eprintln!("{game}: no {}", kind.metadata_file());
-        return Metadata::default();
-    };
-    let strings: Vec<String> = STRINGS_FILES.iter().filter_map(|f| read(f)).collect();
-    let strings: Vec<&str> = strings.iter().map(String::as_str).collect();
-    let meta = Metadata::from_tables(&metadata, &strings);
-    match kind.objects_file().and_then(read) {
-        Some(objects) => meta.with_codes(&objects),
-        None => meta,
-    }
+    Metadata::load(kind, read)
 }
 
 /// Prints what `check` finds in a binary file (through its text form)

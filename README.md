@@ -149,6 +149,8 @@ Hbz2[3].B=0.25 // Damage: unreal
 
 ## Metadata
 
+`Metadata::load(kind, read)` reads all of it, `read` giving a game file's
+text by name (from archives or folders: the caller's choice). Below it,
 `Metadata::from_tables(table, strings)` reads a kind's metadata table
 (`Kind::metadata_file`: `Units\AbilityMetaData.slk` for abilities,
 `Units\UnitMetaData.slk` for units and items, ...) and the editor's

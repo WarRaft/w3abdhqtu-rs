@@ -300,6 +300,25 @@ impl Metadata {
         self.codes.get(&id).copied().unwrap_or(id)
     }
 
+    /// The metadata of `kind` from the game's files, `read` giving a file's
+    /// text by its name (`Units\\AbilityMetaData.slk`; `None` when the game
+    /// hasn't it): its table ([`Kind::metadata_file`]), the editor's strings
+    /// ([`STRINGS_FILES`]) and its objects' codes ([`Kind::objects_file`]).
+    /// Empty without the table. Finding the files (archives, game folders)
+    /// is the caller's job.
+    pub fn load(kind: Kind, read: impl Fn(&str) -> Option<String>) -> Metadata {
+        let Some(table) = read(kind.metadata_file()) else {
+            return Metadata::default();
+        };
+        let strings: Vec<String> = STRINGS_FILES.iter().filter_map(|f| read(f)).collect();
+        let strings: Vec<&str> = strings.iter().map(String::as_str).collect();
+        let meta = Metadata::from_tables(&table, &strings);
+        match kind.objects_file().and_then(&read) {
+            Some(objects) => meta.with_codes(&objects),
+            None => meta,
+        }
+    }
+
     pub fn get(&self, field: Rawcode) -> Option<&FieldMeta> {
         self.fields.get(&field)
     }
