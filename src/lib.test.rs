@@ -272,10 +272,13 @@ fn corpus() {
         );
         let names = &names.iter().find(|(k, _)| *k == kind).unwrap().1;
         let text = data.to_text_named(names);
-        let back = from_text(&text);
+        let back = from_text(&text, names);
         assert_eq!(back.errors, vec![], "{}", path.display());
+        // The same data, but the `end` ids, which the text leaves out.
+        let mut plain = data.clone();
+        plain.clear_ends();
         assert!(
-            back.data.as_ref() == Some(&data),
+            back.data.as_ref() == Some(&plain),
             "{}: differs after the text form",
             path.display()
         );

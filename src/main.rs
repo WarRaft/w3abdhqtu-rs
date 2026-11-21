@@ -20,7 +20,13 @@ fn usage() {
         "       w3abdhqtu-rs --check <file> <game>   check the fields of a .w3? file or a text form"
     );
     eprintln!("                                            against the game's metadata");
-    eprintln!("       w3abdhqtu-rs --build <text> <out>    write the binary file from a text form");
+    eprintln!("       w3abdhqtu-rs --build <text> <out> [<game>]");
+    eprintln!(
+        "                                            write the binary file from a text form; give"
+    );
+    eprintln!(
+        "                                            the game folder the text was written with"
+    );
     eprintln!();
     eprintln!("  .w3? is any of .w3a .w3b .w3d .w3h .w3q .w3t .w3u");
 }
@@ -41,7 +47,8 @@ fn main() -> ExitCode {
         ["--text", path, game] => {
             read(path).map(|data| print!("{}", data.to_text_named(&names(game, data.kind))))
         }
-        ["--build", text, out] => build(text, out),
+        ["--build", text, out] => build(text, out, None),
+        ["--build", text, out, game] => build(text, out, Some(game)),
         ["--check", path, game] => lint(path, game),
         paths if !paths.iter().any(|p| p.starts_with('-')) => {
             let failed = paths
@@ -112,14 +119,16 @@ fn lint(path: &str, game: &str) -> Result<(), String> {
         Some(_) => read(path)?.to_text(),
         None => std::fs::read_to_string(path).map_err(|err| format!("{path}: {err}"))?,
     };
-    let parsed = from_text(&text);
+    // The kind first, for its metadata; then the text, with it.
+    let Some(kind) = from_text(&text, &Metadata::default()).kind else {
+        return Err(format!("{path}: not object data"));
+    };
+    let meta = names(game, kind);
+    let parsed = from_text(&text, &meta);
     for e in &parsed.errors {
         println!("{path}:{}:{}: error: {}", e.line, e.col, e.message);
     }
-    let Some(kind) = parsed.kind else {
-        return Err(format!("{path}: not object data"));
-    };
-    let found = w3abdhqtu_rs::check(&parsed, &names(game, kind));
+    let found = w3abdhqtu_rs::check(&parsed, &meta);
     for d in &found {
         let col = d.span.map_or(1, |s| s.start_col);
         println!(
@@ -140,9 +149,13 @@ fn lint(path: &str, game: &str) -> Result<(), String> {
     }
 }
 
-fn build(text_path: &str, out: &str) -> Result<(), String> {
+fn build(text_path: &str, out: &str, game: Option<&str>) -> Result<(), String> {
     let text = std::fs::read_to_string(text_path).map_err(|err| format!("{text_path}: {err}"))?;
-    let parsed = from_text(&text);
+    let meta = match (game, from_text(&text, &Metadata::default()).kind) {
+        (Some(game), Some(kind)) => names(game, kind),
+        _ => Metadata::default(),
+    };
+    let parsed = from_text(&text, &meta);
     for e in &parsed.errors {
         eprintln!("{text_path}:{}:{}: {}", e.line, e.col, e.message);
     }
@@ -184,14 +197,16 @@ fn check(path: &str) -> Result<(), String> {
             "written back differs from the original at byte 0x{at:X}"
         ));
     }
-    let back = from_text(&data.to_text());
+    let back = from_text(&data.to_text(), &Metadata::default());
     if let Some(e) = back.errors.first() {
         return Err(format!(
             "its text form has errors, first at line {}: {}",
             e.line, e.message
         ));
     }
-    if back.data.as_ref() != Some(&data) {
+    let mut plain = data.clone();
+    plain.clear_ends();
+    if back.data.as_ref() != Some(&plain) {
         return Err("differs after going through the text form".into());
     }
     Ok(())

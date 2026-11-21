@@ -48,7 +48,7 @@ fn abilities() -> Metadata {
 }
 
 fn found(text: &str, meta: &Metadata) -> Vec<(usize, usize, &'static str, String)> {
-    let parsed = from_text(text);
+    let parsed = from_text(text, meta);
     assert_eq!(parsed.errors, vec![], "{text}");
     check(&parsed, meta)
         .into_iter()
@@ -61,7 +61,8 @@ fn found(text: &str, meta: &Metadata) -> Vec<(usize, usize, &'static str, String
 
 #[test]
 fn a_good_file_has_nothing() {
-    let text = "[w3a]\nversion=2\n[A000]\n_parent=AHbz\nanam=\"Storm\"\naher=1\nacdn[1]=unreal 6.0\nHbz1[2].A=3\nHbz2[2].B=unreal 25.0\natar[1]=\"air,ground\"\nanew=5\n";
+    // Plain numbers take their field's type: `acdn[1]=6` is an unreal.
+    let text = "[w3a]\nversion=2\n[A000]\n_parent=AHbz\nanam=\"Storm\"\naher=1\nacdn[1]=6\nHbz1[2].A=3\nHbz2[2].B=unreal 25.0\natar[1]=\"air,ground\"\nanew=5\n";
     assert_eq!(found(text, &abilities()), vec![]);
     // No metadata, no checks.
     assert_eq!(
@@ -75,9 +76,10 @@ fn a_good_file_has_nothing() {
 
 #[test]
 fn value_types() {
-    let text = "[w3a]\nversion=2\n[AHbz]\nanam=5\nacdn[1]=6\nHbz1[1].A=unreal 2.0\nHbz2[1].B=1.5\naher=\"1\"\n";
+    // Only a type written out can differ from the field's.
+    let text = "[w3a]\nversion=2\n[AHbz]\nanam=5\nacdn[1]=int 6\nHbz1[1].A=unreal 2.0\nHbz2[1].B=real 1.5\naher=\"1\"\n";
     let meta = abilities();
-    let parsed = from_text(text);
+    let parsed = from_text(text, &meta);
     let found = check(&parsed, &meta);
     let fixes: Vec<(usize, &str, String)> = found
         .iter()
@@ -95,9 +97,9 @@ fn value_types() {
         fixes,
         vec![
             (4, rule::OBJECT_VALUE_TYPE, "\"5\"".into()),
-            (5, rule::OBJECT_VALUE_TYPE, "unreal 6.0".into()),
+            (5, rule::OBJECT_VALUE_TYPE, "6.0".into()),
             (6, rule::OBJECT_VALUE_TYPE, "2".into()),
-            (7, rule::OBJECT_VALUE_TYPE, "unreal 1.5".into()),
+            (7, rule::OBJECT_VALUE_TYPE, "1.5".into()),
             (8, rule::OBJECT_VALUE_TYPE, "1".into()),
         ]
     );
@@ -106,9 +108,9 @@ fn value_types() {
         "`acdn` (Cool) is an unreal, not a whole number: the game would misread it"
     );
     assert_eq!(found[1].level, parser_rs::Level::Error);
-    // The fix covers the value only, not `,end ...`.
+    // The fix covers the value.
     let span = found[1].fix.as_ref().unwrap().edits[0].span;
-    assert_eq!((span.start_col, span.end_col), (9, 10));
+    assert_eq!((span.start_col, span.end_col), (9, 14));
 }
 
 #[test]
@@ -143,7 +145,7 @@ fn ranges() {
 fn levels_and_columns() {
     let text = "[w3a]\nversion=2\n[AHbz]\nanam[1]=\"x\"\nacdn=unreal 1.0\nHbz1[1]=3\nHbz2[1].A=unreal 1.0\n";
     let meta = abilities();
-    let parsed = from_text(text);
+    let parsed = from_text(text, &meta);
     let found: Vec<(usize, String, String)> = check(&parsed, &meta)
         .into_iter()
         .map(|d| (d.line, d.message, d.fix.unwrap().edits[0].text.clone()))

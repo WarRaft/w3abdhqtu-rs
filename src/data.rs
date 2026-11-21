@@ -97,6 +97,18 @@ impl Value {
 }
 
 impl ObjectData {
+    /// Sets every field's `end` id to 0, as the text form reads it: the
+    /// game doesn't read it.
+    pub fn clear_ends(&mut self) {
+        for object in self.originals.iter_mut().chain(&mut self.customs) {
+            for set in &mut object.sets {
+                for m in &mut set.mods {
+                    m.end = Rawcode::NONE;
+                }
+            }
+        }
+    }
+
     /// An empty file of the latest version.
     pub fn new(kind: Kind) -> Self {
         ObjectData {

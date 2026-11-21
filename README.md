@@ -98,13 +98,14 @@ version=2
 
 [ACwe]
 arlv=6 // Required Level: int
-aret="TRIGSTR_287",end 0x00000000 // Tooltip - Learn: string
+aret="TRIGSTR_287" // Tooltip - Learn: string
 
 [A000]
 _parent=AHbz
 anam="Blizzard" // Name: string
 aub1[2]="Line one"\n"Line two" // Tooltip - Normal - Extended: string
-Hbz1[3].A=12,end A000 // Number of Waves: int
+Hbz1[3].A=12 // Number of Waves: int
+Hbz2[3].B=0.25 // Damage: unreal
 ```
 
 - **The file's section** comes first: `[w3a]` ... `[w3u]`, with
@@ -116,18 +117,24 @@ Hbz1[3].A=12,end A000 // Number of Waves: int
 - **A field** is `id=value`. Abilities, upgrades and doodads (since
   version 2) add `[level]` and the data column as `.A` for `Data A` (1)
   ... `.Z`, or `.27` past that; 0s are left out.
-- **Values.** `500` is an integer; `1.5`, `1e-7`, `-0.0`, `inf` are
-  reals; `unreal 0.25` is an unreal; `"text"` is a string. A real whose
-  number can't say it exactly (a NaN with a payload) is written as its
-  bits: `real 0x7FC00001`.
+- **Values.** `"text"` is a string, anything else a number of the field's
+  type, from the game's metadata (`from_text(text, &meta)`): `Hbz2` is an
+  unreal, so `Hbz2[3].B=0.25` is one; the comment and the editor's hover
+  say which type it is. A number whose type isn't its field's says it:
+  `int 3`, `real 1.5`, `unreal 0.25`; so does any unreal when there's no
+  metadata, where a whole number is an integer and any other a real
+  (`1.5`, `1e-7`, `-0.0`, `inf`). A real whose number can't say it exactly
+  (a NaN with a payload) is written as its bits: `real 0x7FC00001`. Real
+  files need none of this: over 104,000 fields, none says its type.
 - **Strings.** BNI strings have no escapes and no line breaks, so what
   they can't hold goes between quoted parts, unquoted: `\n` `\r` `\t` and
   `\u{22}` for `"` (or any other character by its hex code). The parts
   join into one string: `"a"\r\n"b"`.
-- **The `end` id.** Each field ends with an id the game doesn't read. The
-  World Editor mostly writes the base id in changed standard objects and
-  0 in custom ones; when a field has another, it's written after the
-  value: `,end A000`.
+- **No `end` id.** Each field ends with an id the game doesn't read
+  (World Editor writes the base id in changed standard objects, 0 in
+  custom ones). The text leaves it out, and saving writes 0, so a file
+  that goes through the text changes there and nowhere else
+  (`ObjectData::clear_ends`).
 - **Rare cases.** Sets (version 3) start with `_flags=` and their flags;
   fields before the first one are in a set with flags 0. `_table=original`
   or `_table=custom` puts an object in the other table than `_parent`
@@ -178,7 +185,7 @@ other lines have errors) and gives lint diagnostics, each its own rule:
 
 | rule | level | finds |
 |------|-------|-------|
-| `object-value-type` | error | a value stored as another type than the field's: `anam=5`, `acdn[1]=6` for an unreal. The game misreads it. Quick fix: the same value as the right type (`"5"`, `unreal 6.0`) |
+| `object-value-type` | error | a value stored as another type than the field's: a number in a string field (`anam=5`), a string in a number field, a type written out that isn't the field's (`acdn[1]=int 6` for an unreal). The game misreads it. Quick fix: the same value as the field's type (`"5"`, `6.0`) |
 | `object-value-range` | warning | a number outside World Editor's limits, a `bool` other than 0 or 1. World Editor lets a map go past its limits (Shift+Enter), so real maps do: 562 of 104,000 fields |
 | `object-unknown-field` | warning | a field the game's metadata doesn't have: a typo, or a field of a newer game |
 | `object-field-level` | warning | a level on a field without levels, level 0 on one with (old maps have a few, Blizzard's campaign too), another data column than the field's. Quick fix: the right key |
@@ -216,7 +223,8 @@ a string containing NUL.
 - Checked byte for byte on 311 files from 208 maps and a campaign
   (Blizzard's melee and campaign maps, custom maps). No version 3 file
   was among them; version 3 is covered by unit tests.
-- The text form reads back every one of them unchanged.
+- The text form reads back every one of them unchanged but the `end`
+  ids, with 1.26's metadata and without.
 - Every field of those files gets a name from 1.26's metadata.
 - Checked against 1.26's metadata: no wrong types, unknown fields or
   fields of other objects in any of them; 562 values past World Editor's

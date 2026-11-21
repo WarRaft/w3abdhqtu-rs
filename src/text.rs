@@ -1,6 +1,7 @@
 //! The text form of object data, in BNI (`bni-rs`): what the editor shows
-//! and saves. Every file converts to text and back to the same bytes, so
-//! nothing is lost by editing it as text. The syntax is in the README:
+//! and saves. Every file converts to text and back to the same data, but
+//! the `end` id each field ends with: the game doesn't read it, so the
+//! text leaves it out and saving writes 0. The syntax is in the README:
 //!
 //! ```ini
 //! [w3a]
@@ -12,13 +13,18 @@
 //! [A000]
 //! _parent=ANwm
 //! aub1[2]="Line one"\n"Line two"
-//! Hbz1[3].B=unreal 0.25,end A000
+//! Hbz1[3].B=0.25
 //! ```
+//!
+//! A number's type (integer, real, unreal) is the field's, from the game's
+//! metadata ([`Metadata`]): `Hbz2` is an unreal, so `0.25` is one. Only a
+//! value whose type differs from its field's, or any unreal without
+//! metadata, says it: `unreal 0.25`, `real 1.5`, `int 3`.
 
 use bni_rs::ast::{Field, Item, Section, ValueKind};
 use parser_rs::{ParseError, Rawcode, Span};
 
-use crate::{Kind, Metadata, Mod, Object, ObjectData, Set, Value};
+use crate::{Kind, Metadata, Mod, Object, ObjectData, Set, Storage, Value};
 
 impl Kind {
     /// What the file holds, in words.
@@ -42,12 +48,6 @@ const PARENT: &str = "_parent";
 const TABLE: &str = "_table";
 /// Starts a set with these flags (version 3).
 const FLAGS: &str = "_flags";
-
-/// The id an object's fields end with unless the text says otherwise
-/// (`,end ...`): what the World Editor writes most of the time.
-fn default_end(original: bool, object: &Object) -> Rawcode {
-    if original { object.base } else { Rawcode::NONE }
-}
 
 /// An id in the text: its four characters when they are letters, digits
 /// or `_`, otherwise `0x` and eight hex digits.
@@ -127,24 +127,38 @@ pub fn string_text(s: &str) -> String {
     out
 }
 
-pub(crate) fn value_text(value: &Value) -> String {
+/// How a value is written for a field stored as `storage` (`None` when
+/// the metadata doesn't say): a plain number when reading it back as the
+/// field's type gives the same value, else with its type first.
+pub(crate) fn value_text(value: &Value, storage: Option<Storage>) -> String {
     match value {
-        Value::Int(v) => v.to_string(),
-        Value::Real(v) => {
-            let text = real_text(*v);
-            if text.starts_with("0x") {
-                format!("real {text}")
-            } else {
-                text
-            }
+        Value::Int(v) if matches!(storage, None | Some(Storage::Int | Storage::Str)) => {
+            v.to_string()
         }
-        Value::Unreal(v) => format!("unreal {}", real_text(*v)),
+        Value::Int(v) => format!("int {v}"),
+        Value::Real(v) => typed(
+            "real",
+            real_text(*v),
+            matches!(storage, None | Some(Storage::Real | Storage::Str)),
+        ),
+        Value::Unreal(v) => typed("unreal", real_text(*v), storage == Some(Storage::Unreal)),
         Value::Str(s) => string_text(s),
     }
 }
 
+/// A real or unreal: plain when `plain` and it reads back as a real
+/// (`1.0`, not `0x7FC00001`), else with its type first.
+fn typed(ty: &str, text: String, plain: bool) -> String {
+    if plain && !text.starts_with("0x") {
+        text
+    } else {
+        format!("{ty} {text}")
+    }
+}
+
 impl ObjectData {
-    /// The text form. [`from_text`] reads it back into the same data.
+    /// The text form. [`from_text`] reads it back into the same data, but
+    /// the `end` ids, which it leaves out (0).
     pub fn to_text(&self) -> String {
         self.to_text_named(&Metadata::default())
     }
@@ -152,7 +166,9 @@ impl ObjectData {
     /// [`to_text`](Self::to_text), with each field's name and type from
     /// `meta` as a comment after it:
     /// `uhpm=500 // Hit Points Maximum (Base): int`. Comments are only for
-    /// reading; [`from_text`] skips them.
+    /// reading; [`from_text`] skips them. A number is written plain when
+    /// its type is its field's (`Hbz2[1].B=0.25`, an unreal): read it back
+    /// with the same `meta`.
     pub fn to_text_named(&self, meta: &Metadata) -> String {
         let ext = self.kind.extension();
         let mut out = format!(
@@ -186,17 +202,14 @@ impl ObjectData {
             *out += &format!("{TABLE}=original\n");
         }
 
-        let end = default_end(original, object);
         for (i, set) in object.sets.iter().enumerate() {
             let implicit = i == 0 && set.flags == 0 && (self.version < 3 || !set.mods.is_empty());
             if !implicit {
                 *out += &format!("{FLAGS}={}\n", set.flags);
             }
             for m in &set.mods {
-                *out += &format!("{}={}", key_text(m), value_text(&m.value));
-                if m.end != end {
-                    *out += &format!(",end {}", id_text(m.end));
-                }
+                let storage = meta.get(m.field).and_then(|f| f.storage);
+                *out += &format!("{}={}", key_text(m), value_text(&m.value, storage));
                 match meta.get(m.field) {
                     Some(f) if f.ty.is_empty() => *out += &format!(" // {}", f.name),
                     Some(f) => *out += &format!(" // {}: {}", f.name, f.ty),
@@ -238,19 +251,21 @@ pub struct FieldAt {
     /// based on, or the standard one itself.
     pub base: Rawcode,
     pub field: Mod,
-    /// The key (`Hbz1[3].B`) and the value, without `,end ...`.
+    /// The key (`Hbz1[3].B`) and the value.
     pub key: Span,
     pub value: Span,
 }
 
-/// Reads the text form. Every error is reported, not just the first;
-/// there is data only without errors.
-pub fn from_text(text: &str) -> Parsed {
-    from_bni(&bni_rs::parse(text))
+/// Reads the text form; a plain number has its field's type in `meta`
+/// (an empty one: a whole number is an integer, any other a real). Every
+/// error is reported, not just the first; there is data only without
+/// errors. Fields end with 0 (`Mod::end`).
+pub fn from_text(text: &str, meta: &Metadata) -> Parsed {
+    from_bni(&bni_rs::parse(text), meta)
 }
 
 /// [`from_text`] for text already parsed as BNI. Its BNI errors count.
-pub fn from_bni(doc: &bni_rs::Document) -> Parsed {
+pub fn from_bni(doc: &bni_rs::Document, meta: &Metadata) -> Parsed {
     let mut errors = doc.errors.clone();
     for item in &doc.preamble {
         errors.push(error(
@@ -282,7 +297,9 @@ pub fn from_bni(doc: &bni_rs::Document) -> Parsed {
     };
     let mut fields = Vec::new();
     for section in objects {
-        if let Some((original, object)) = object(section, kind, version, &mut errors, &mut fields) {
+        if let Some((original, object)) =
+            object(section, kind, version, meta, &mut errors, &mut fields)
+        {
             if original {
                 data.originals.push(object)
             } else {
@@ -443,6 +460,7 @@ fn object(
     section: &Section,
     kind: Kind,
     version: u32,
+    meta: &Metadata,
     errors: &mut Vec<ParseError>,
     fields: &mut Vec<FieldAt>,
 ) -> Option<(bool, Object)> {
@@ -497,8 +515,6 @@ fn object(
         id,
         sets: Vec::new(),
     };
-    let end = default_end(original, &object);
-
     for item in &section.items {
         let Some(key) = &item.key else {
             errors.push(error(item.eq, "expected a field id before `=`"));
@@ -529,7 +545,7 @@ fn object(
                 }
             }
             _ => {
-                if let Some((m, value)) = field(item, key, kind, version, end, errors) {
+                if let Some((m, value)) = field(item, key, kind, version, meta, errors) {
                     fields.push(FieldAt {
                         base,
                         field: m.clone(),
@@ -596,7 +612,7 @@ fn field(
     key: &bni_rs::ast::Name,
     kind: Kind,
     version: u32,
-    end: Rawcode,
+    meta: &Metadata,
     errors: &mut Vec<ParseError>,
 ) -> Option<(Mod, Span)> {
     let (field, level, column, addressed) = match parse_key(key.text.trim()) {
@@ -618,54 +634,39 @@ fn field(
         ));
         return None;
     }
-    let (value_field, end_field) = match item.fields.as_slice() {
+    let value_field = match item.fields.as_slice() {
         [] => {
             errors.push(error(item.eq, "expected a value after `=`"));
             return None;
         }
-        [v] => (v, None),
-        [v, e] => (v, Some(e)),
-        [_, _, extra, ..] => {
+        [v] => v,
+        [_, extra, ..] => {
             errors.push(error(
                 extra.span,
-                "expected the value, and maybe `end` and an id",
+                "expected only the value; a string with a comma is quoted",
             ));
             return None;
         }
     };
-    let value = value(value_field).map_err(|e| errors.push(e)).ok()?;
-    let end = match end_field {
-        None => end,
-        Some(f) => {
-            let text = f.text();
-            match text
-                .trim()
-                .strip_prefix("end")
-                .map(str::trim)
-                .and_then(parse_id)
-            {
-                Some(id) => id,
-                None => {
-                    errors.push(error(
-                        f.span,
-                        format!("expected `end` and an id: {ID_FORM}"),
-                    ));
-                    return None;
-                }
-            }
-        }
-    };
+    let storage = meta.get(field).and_then(|f| f.storage);
+    let value = value(value_field, storage)
+        .map_err(|e| errors.push(e))
+        .ok()?;
     let m = Mod {
         field,
         level,
         column,
         value,
-        end,
+        // The game doesn't read it.
+        end: Rawcode::NONE,
     };
     Some((m, value_field.span))
 }
 
-fn value(field: &Field) -> Result<Value, ParseError> {
+/// A value for a field stored as `storage`: a plain number takes the
+/// field's type; one that doesn't fit it (`1.5` for an integer field) and
+/// any without metadata is an integer when whole, else a real.
+fn value(field: &Field, storage: Option<Storage>) -> Result<Value, ParseError> {
     if field.parts.is_empty() {
         return Err(error(field.span, "expected a value"));
     }
@@ -682,6 +683,12 @@ fn value(field: &Field) -> Result<Value, ParseError> {
     if words.next().is_some() {
         return Err(error(field.span, VALUE_FORM));
     }
+    if let ("int", Some(n)) = (first, second) {
+        return n
+            .parse::<i32>()
+            .map(Value::Int)
+            .map_err(|_| error(field.span, "expected a whole number after `int`"));
+    }
     let typed = match (first, second) {
         ("real", Some(n)) => Some((Value::Real as fn(f32) -> Value, n)),
         ("unreal", Some(n)) => Some((Value::Unreal as fn(f32) -> Value, n)),
@@ -696,16 +703,18 @@ fn value(field: &Field) -> Result<Value, ParseError> {
             )
         });
     }
-    if let Ok(v) = first.parse::<i32>() {
-        return Ok(Value::Int(v));
-    }
-    first
+    let number = first
         .parse::<f32>()
-        .map(Value::Real)
-        .map_err(|_| error(field.span, VALUE_FORM))
+        .map_err(|_| error(field.span, VALUE_FORM))?;
+    Ok(match (storage, first.parse::<i32>()) {
+        (Some(Storage::Real), _) => Value::Real(number),
+        (Some(Storage::Unreal), _) => Value::Unreal(number),
+        (_, Ok(v)) => Value::Int(v),
+        (_, Err(_)) => Value::Real(number),
+    })
 }
 
-const VALUE_FORM: &str = "expected a value: a number, `unreal` and a number, or a \"string\"";
+const VALUE_FORM: &str = "expected a value: a number, or a \"string\" (`int`, `real` or `unreal` before a number gives its type)";
 
 /// Quoted parts as written; unquoted parts between them are escapes.
 fn string(field: &Field) -> Result<String, ParseError> {

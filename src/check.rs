@@ -70,7 +70,7 @@ fn value_type(at: &FieldAt, field: &FieldMeta, what: &str) -> Option<Diagnostic>
     )
     .at(at.value);
     if let Some(value) = convert(&at.field.value, want) {
-        let text = value_text(&value);
+        let text = value_text(&value, Some(want));
         d = d.with_fix(Fix {
             title: format!("Write {text}"),
             edits: vec![Edit {

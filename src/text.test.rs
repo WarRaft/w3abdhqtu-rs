@@ -28,11 +28,18 @@ fn m(field: &[u8; 4], level: u32, column: u32, value: Value, end: Rawcode) -> Mo
     }
 }
 
+/// The text of `d`, checked to read back as `d` with its `end` ids 0.
 fn round_trip(d: &ObjectData) -> String {
-    let text = d.to_text();
-    let parsed = from_text(&text);
+    round_trip_with(d, &Metadata::default())
+}
+
+fn round_trip_with(d: &ObjectData, meta: &Metadata) -> String {
+    let text = d.to_text_named(meta);
+    let parsed = from_text(&text, meta);
     assert_eq!(parsed.errors, vec![], "{text}");
-    assert_eq!(parsed.data.as_ref(), Some(d), "{text}");
+    let mut want = d.clone();
+    want.clear_ends();
+    assert_eq!(parsed.data.as_ref(), Some(&want), "{text}");
     text
 }
 
@@ -82,7 +89,7 @@ uhpm=500
 [h000]
 _parent=hfoo
 unam="Knight, "\u{22}"the"\u{22}" // one"
-usca=1.5,end hfoo
+usca=1.5
 utip="Line one"\r\n"Line two"\n
 "#
     );
@@ -119,7 +126,8 @@ fn levels_columns_and_unreal() {
         )],
     );
     let text = round_trip(&d);
-    assert!(text.contains("Hbz1[3].B=unreal 0.25,end A000\n"), "{text}");
+    // Without metadata an unreal says so; `end` is never written.
+    assert!(text.contains("Hbz1[3].B=unreal 0.25\n"), "{text}");
     assert!(text.contains("Hbz2[1].30=-0.0\n"), "{text}");
     assert!(text.contains("Hbz3.A=1e-7\n"), "{text}");
     assert!(text.contains("Hbz4=real 0x7FC00001\n"), "{text}");
@@ -183,7 +191,7 @@ fn unusual_tables_and_ids() {
         "{text}"
     );
     assert!(
-        text.contains("[0x00000000]\n_parent=rat6\n0x69000001=-3,end 0x00000001\n"),
+        text.contains("[0x00000000]\n_parent=rat6\n0x69000001=-3\n"),
         "{text}"
     );
 }
@@ -191,7 +199,10 @@ fn unusual_tables_and_ids() {
 #[test]
 fn friendly_input() {
     let parsed = from_text(
-        "[w3t]\nversion = 1\n\n[I000]  // a sword\n_parent = ratc\niabi = \"AIat\" // abilities\n",
+        &String::from(
+            "[w3t]\nversion = 1\n\n[I000]  // a sword\n_parent = ratc\niabi = \"AIat\" // abilities\n",
+        ),
+        &Metadata::default(),
     );
     assert_eq!(parsed.errors, vec![]);
     let d = parsed.data.unwrap();
@@ -203,7 +214,7 @@ fn friendly_input() {
 }
 
 fn errors(text: &str) -> Vec<(usize, usize, String)> {
-    let parsed = from_text(text);
+    let parsed = from_text(text, &Metadata::default());
     assert!(parsed.data.is_none());
     parsed
         .errors
@@ -219,13 +230,13 @@ fn every_error_is_reported() {
         errors(text),
         vec![
             (4, 9, "expected the base object's id: four letters, digits or `_`, or 0x and eight hex digits".into()),
-            (5, 6, "expected a value: a number, `unreal` and a number, or a \"string\"".into()),
+            (5, 6, "expected a value: a number, or a \"string\" (`int`, `real` or `unreal` before a number gives its type)".into()),
             (6, 6, "string isn't closed: `\"` missing".into()),
             (9, 1, "fields of units have no level or data column".into()),
             (10, 1, "sets need format version 3; this is version 2".into()),
             (11, 1, "expected a field id: four letters, digits or `_`, or 0x and eight hex digits".into()),
             (12, 9, "between quoted parts only escapes: \\n \\r \\t or \\u{...}".into()),
-            (13, 8, "expected `end` and an id: four letters, digits or `_`, or 0x and eight hex digits".into()),
+            (13, 8, "expected only the value; a string with a comma is quoted".into()),
         ]
     );
 }
@@ -252,9 +263,12 @@ fn header_errors() {
     // Doodads have levels only since version 2.
     assert_eq!(errors("[w3d]\nversion=1\n[YOws]\ndvr1[1]=80\n").len(), 1);
     assert!(
-        from_text("[w3d]\nversion=2\n[YOws]\ndvr1[1]=80\n")
-            .data
-            .is_some()
+        from_text(
+            "[w3d]\nversion=2\n[YOws]\ndvr1[1]=80\n",
+            &Metadata::default()
+        )
+        .data
+        .is_some()
     );
 }
 
@@ -284,14 +298,11 @@ fn field_names_as_comments() {
             ],
         )],
     );
-    let text = d.to_text_named(&names);
+    let text = round_trip_with(&d, &names);
     assert!(
-        text.contains("Hbz1[3].B=6,end A000 // Number of Waves // all\nanam=\"Storm\"\n"),
+        text.contains("Hbz1[3].B=6 // Number of Waves // all\nanam=\"Storm\"\n"),
         "{text}"
     );
-    let parsed = from_text(&text);
-    assert_eq!(parsed.errors, vec![]);
-    assert_eq!(parsed.data, Some(d));
 }
 
 #[test]
@@ -313,4 +324,53 @@ fn fields_under_the_cursor() {
     assert_eq!(at(2, 1), None);
     assert_eq!(field_at(&bni_rs::parse("[a]\n[b]\nx=1\n"), 3, 1), None);
     assert_eq!(field_at(&doc, 4, 1).unwrap().kind, Kind::Ability);
+}
+
+#[test]
+fn numbers_take_their_fields_type() {
+    let table = "C;X1;Y1;K\"ID\"\nC;X2;K\"type\"\nC;X3;K\"field\"\n\
+C;X1;Y2;K\"Hbz1\"\nC;X2;K\"int\"\nC;X3;K\"Waves\"\n\
+C;X1;Y3;K\"Hbz2\"\nC;X2;K\"unreal\"\nC;X3;K\"Damage\"\n\
+C;X1;Y4;K\"Hbz3\"\nC;X2;K\"real\"\nC;X3;K\"Area\"\n";
+    let meta = Metadata::from_tables(table, &[]);
+    let id = Rawcode(*b"A000");
+    let d = data(
+        Kind::Ability,
+        2,
+        vec![],
+        vec![object(
+            b"AHbz",
+            id,
+            vec![
+                m(b"Hbz1", 1, 1, Value::Int(3), id),
+                m(b"Hbz2", 1, 2, Value::Unreal(25.0), id),
+                m(b"Hbz3", 1, 3, Value::Real(2.5), Rawcode::NONE),
+                // Types other than the field's say so, to read back the same.
+                m(b"Hbz1", 2, 1, Value::Real(3.0), Rawcode::NONE),
+                m(b"Hbz2", 2, 2, Value::Int(25), Rawcode::NONE),
+                m(b"Hbz3", 2, 3, Value::Unreal(2.5), Rawcode::NONE),
+            ],
+        )],
+    );
+    let text = round_trip_with(&d, &meta);
+    for line in [
+        "Hbz1[1].A=3 // Waves: int",
+        "Hbz2[1].B=25.0 // Damage: unreal",
+        "Hbz3[1].C=2.5 // Area: real",
+        "Hbz1[2].A=real 3.0 // Waves: int",
+        "Hbz2[2].B=int 25 // Damage: unreal",
+        "Hbz3[2].C=unreal 2.5 // Area: real",
+    ] {
+        assert!(text.contains(&format!("{line}\n")), "{line}\n{text}");
+    }
+    // A plain whole number in a real field is a real; without metadata,
+    // it is an integer.
+    let plain = "[w3a]\nversion=2\n[A000]\n_parent=AHbz\nHbz2[1].B=25\n";
+    let value = |meta: &Metadata| {
+        from_text(plain, meta).data.unwrap().customs[0].sets[0].mods[0]
+            .value
+            .clone()
+    };
+    assert_eq!(value(&meta), Value::Unreal(25.0));
+    assert_eq!(value(&Metadata::default()), Value::Int(25));
 }
