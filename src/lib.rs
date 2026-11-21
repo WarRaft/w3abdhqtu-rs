@@ -35,7 +35,7 @@ pub use data::{Mod, Object, ObjectData, Set, Value};
 pub use kind::Kind;
 pub use metadata::{FieldMeta, Keys, Metadata, STRINGS_FILES, Storage};
 pub use parser_rs::{BinError, BinResult, Rawcode};
-pub use read::parse;
+pub use read::{parse, read};
 pub use text::{
     FieldAt, FieldRef, Hint, Parsed, field_at, field_hints, field_key, from_bni, from_text,
     id_text, is_object_text, string_text,

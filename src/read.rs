@@ -12,17 +12,26 @@ const MIN_OBJECT: usize = 12;
 /// Reads a whole file. Anything left after the data is an error.
 pub fn parse(bytes: &[u8], kind: Kind) -> BinResult<ObjectData> {
     let mut r = Reader::new(bytes);
+    let data = read(&mut r, kind)?;
+    r.finish()?;
+    Ok(data)
+}
+
+/// Reads one file's data from `r` and stops after it: for files that
+/// hold object data inside them (an object collection, `.w3o`, holds one
+/// of each kind after another).
+pub fn read(r: &mut Reader, kind: Kind) -> BinResult<ObjectData> {
+    let at = r.pos();
     let version = r.u32()?;
     if !crate::VERSIONS.contains(&version) {
         return Err(parser_rs::BinError::new(
-            0,
+            at,
             format!("unknown {} version {version}", kind.extension()),
         ));
     }
     let ctx = Ctx { kind, version };
     let originals = r.list(MIN_OBJECT, |r| ctx.object(r))?;
     let customs = r.list(MIN_OBJECT, |r| ctx.object(r))?;
-    r.finish()?;
     Ok(ObjectData {
         kind,
         version,
