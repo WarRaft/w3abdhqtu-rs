@@ -198,6 +198,26 @@ Each row is a field (`FieldMeta`), by its `ID`:
   `useItem` and `useUnit` / `useHero` / `useBuilding` say whether items
   and units have a units' table field.
 
+## Objects' names
+
+`ObjectNames` (`names.rs`): each kind's objects by id with the name World
+Editor shows (`hfoo` Footman, `Uear` Death Knight (Evil)), for an
+editor to show an id by its name and offer a kind's objects to pick. The
+objects are the rows of the kind's table (`Kind::table_file`:
+`Units\UnitData.slk` ...); the name is the `Name` field (a buff's
+`EditorName`, else its `Bufftip`; the table's `comments` for what
+nothing names, as item abilities' auras), its `EditorSuffix` after it:
+the table's column of that name when it has one (destructables,
+doodads), else the object's section of the profile files
+(`PROFILE_FILES`, one table of sections, a later file's key over an
+earlier one's), a `WESTRING_` key resolved by the caller; a list (an
+upgrade's levels) shows its first. An ability has `hero` too.
+`add_object_data` puts a map's object data over them: a custom object
+named by its fields (their ids from the metadata by key: `unam`,
+`unsf` ...), the rest its standard one's as the game has it; a changed
+one renamed. 1.26a's files name every object (`names_of_a_real_game`,
+`GAME_FILES`).
+
 ## Checks
 
 `check(&parsed, &meta)` checks a parsed text form (`from_text` /
