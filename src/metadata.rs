@@ -187,6 +187,10 @@ pub struct FieldMeta {
     /// heroes or buildings do. `None` when the table doesn't say.
     pub items: Option<bool>,
     pub units: Option<bool>,
+    /// Whether a unit (not a hero or building), a hero, a building has
+    /// it (`useUnit`, `useHero`, `useBuilding`), each `None` when the
+    /// table doesn't say.
+    pub unit_kinds: [Option<bool>; 3],
     /// World Editor's group of it (`category`: `abil`, `art`, `combat`,
     /// `data`, `stats`, `text` ...), empty when the table doesn't say.
     pub category: String,
@@ -420,6 +424,13 @@ impl Metadata {
             }
     }
 
+    /// Whether a unit (`0`), a hero (`1`) or a building (`2`) has field
+    /// `f`, as World Editor shows each its own: by `useUnit`, `useHero`,
+    /// `useBuilding`; one the table says nothing of, yes.
+    pub fn for_unit(f: &FieldMeta, which: usize) -> bool {
+        f.unit_kinds.get(which).copied().flatten() != Some(false)
+    }
+
     /// Every field, by id, in no order.
     pub fn fields(&self) -> impl Iterator<Item = (Rawcode, &FieldMeta)> {
         self.fields.iter().map(|(id, f)| (*id, f))
@@ -502,6 +513,7 @@ impl Columns {
             not_specific: ids(self.not_specific),
             items: flag(self.items),
             units,
+            unit_kinds: self.units.map(|c| flag(c)),
             category: cell(row, self.category).unwrap_or("").to_string(),
             table: cell(row, self.table).unwrap_or("").to_string(),
         })

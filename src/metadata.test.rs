@@ -109,3 +109,14 @@ C;X1;Y3;K\"unam\"\nC;X2;K\"Name\"\nC;X3;K\"text\"\nC;X4;K\"Profile\"\nC;X5;K\"1\
     ids.sort();
     assert_eq!(ids, ["unam"]);
 }
+
+#[test]
+fn a_units_fields_for_a_unit_a_hero_a_building() {
+    let meta = "ID;PWXL;N;E\nC;X1;Y1;K\"ID\"\nC;X2;K\"field\"\nC;X3;K\"useUnit\"\nC;X4;K\"useHero\"\nC;X5;K\"useBuilding\"\n\
+C;X1;Y2;K\"ulev\"\nC;X2;K\"level\"\nC;X3;K\"0\"\nC;X4;K\"1\"\nC;X5;K\"0\"\n\
+C;X1;Y3;K\"uhpm\"\nC;X2;K\"HP\"\nC;X3;K\"1\"\nC;X4;K\"1\"\nC;X5;K\"1\"\nE\n";
+    let m = Metadata::from_tables(meta, &[]);
+    let (lev, hp) = (m.get(Rawcode(*b"ulev")).unwrap(), m.get(Rawcode(*b"uhpm")).unwrap());
+    assert_eq!((Metadata::for_unit(lev, 0), Metadata::for_unit(lev, 1), Metadata::for_unit(lev, 2)), (false, true, false));
+    assert!((0..3).all(|w| Metadata::for_unit(hp, w)));
+}
