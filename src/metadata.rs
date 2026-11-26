@@ -187,6 +187,12 @@ pub struct FieldMeta {
     /// heroes or buildings do. `None` when the table doesn't say.
     pub items: Option<bool>,
     pub units: Option<bool>,
+    /// World Editor's group of it (`category`: `abil`, `art`, `combat`,
+    /// `data`, `stats`, `text` ...), empty when the table doesn't say.
+    pub category: String,
+    /// The game's table it's read from (`slk`: `UnitData`, `UnitBalance`,
+    /// `Profile` for the text files ...), empty when the table doesn't say.
+    pub table: String,
 }
 
 /// An object's fields by key and keys by field ([`Metadata::keys`]).
@@ -263,6 +269,8 @@ impl Metadata {
             not_specific: column("notSpecific"),
             items: column("useItem"),
             units: [column("useUnit"), column("useHero"), column("useBuilding")],
+            category: column("category"),
+            table: column("slk"),
         };
 
         let mut fields = HashMap::new();
@@ -357,17 +365,7 @@ impl Metadata {
     /// `index` as a letter when that tells them apart (`ButtonposA`). The
     /// others keep their ids.
     pub fn keys(&self, kind: Kind, base: Rawcode) -> Keys {
-        let code = self.code(base);
-        let has = |f: &FieldMeta| {
-            let named = |ids: &[Rawcode]| ids.contains(&base) || ids.contains(&code);
-            (f.specific.is_empty() || named(&f.specific))
-                && !named(&f.not_specific)
-                && match kind {
-                    Kind::Item => f.items != Some(false),
-                    Kind::Unit => f.units != Some(false),
-                    _ => true,
-                }
-        };
+        let has = |f: &FieldMeta| self.applies(kind, base, f);
         let mut by_key: HashMap<&str, Vec<(Rawcode, Option<u32>)>> = HashMap::new();
         for (&id, f) in &self.fields {
             if !f.key.is_empty() && has(f) {
@@ -407,6 +405,26 @@ impl Metadata {
         keys
     }
 
+    /// Whether an object of `kind` based on `base` has field `f`: an
+    /// ability's by its code (`useSpecific`, `notSpecific`), items' and
+    /// units' by their table's `useItem`, `useUnit` ... columns.
+    pub fn applies(&self, kind: Kind, base: Rawcode, f: &FieldMeta) -> bool {
+        let code = self.code(base);
+        let named = |ids: &[Rawcode]| ids.contains(&base) || ids.contains(&code);
+        (f.specific.is_empty() || named(&f.specific))
+            && !named(&f.not_specific)
+            && match kind {
+                Kind::Item => f.items != Some(false),
+                Kind::Unit => f.units != Some(false),
+                _ => true,
+            }
+    }
+
+    /// Every field, by id, in no order.
+    pub fn fields(&self) -> impl Iterator<Item = (Rawcode, &FieldMeta)> {
+        self.fields.iter().map(|(id, f)| (*id, f))
+    }
+
     pub fn get(&self, field: Rawcode) -> Option<&FieldMeta> {
         self.fields.get(&field)
     }
@@ -439,6 +457,8 @@ struct Columns {
     not_specific: Option<usize>,
     items: Option<usize>,
     units: [Option<usize>; 3],
+    category: Option<usize>,
+    table: Option<usize>,
 }
 
 impl Columns {
@@ -482,6 +502,8 @@ impl Columns {
             not_specific: ids(self.not_specific),
             items: flag(self.items),
             units,
+            category: cell(row, self.category).unwrap_or("").to_string(),
+            table: cell(row, self.table).unwrap_or("").to_string(),
         })
     }
 }

@@ -93,3 +93,19 @@ fn codes() {
     assert_eq!(meta.code(Rawcode(*b"AIsz")), Rawcode(*b"Aspo"));
     assert_eq!(meta.code(Rawcode(*b"A000")), Rawcode(*b"A000"));
 }
+
+#[test]
+fn a_fields_category_and_table_and_whom_it_applies_to() {
+    let meta = "ID;PWXL;N;E\nC;X1;Y1;K\"ID\"\nC;X2;K\"field\"\nC;X3;K\"category\"\nC;X4;K\"slk\"\nC;X5;K\"useItem\"\n\
+C;X1;Y2;K\"uhpm\"\nC;X2;K\"HP\"\nC;X3;K\"stats\"\nC;X4;K\"UnitBalance\"\nC;X5;K\"0\"\n\
+C;X1;Y3;K\"unam\"\nC;X2;K\"Name\"\nC;X3;K\"text\"\nC;X4;K\"Profile\"\nC;X5;K\"1\"\nE\n";
+    let m = Metadata::from_tables(meta, &[]);
+    let hp = m.get(Rawcode(*b"uhpm")).unwrap();
+    assert_eq!((hp.category.as_str(), hp.table.as_str()), ("stats", "UnitBalance"));
+    let base = Rawcode(*b"ratc");
+    assert!(!m.applies(Kind::Item, base, hp));
+    assert!(m.applies(Kind::Unit, base, hp));
+    let mut ids: Vec<String> = m.fields().filter(|(_, f)| m.applies(Kind::Item, base, f)).map(|(id, _)| id.to_string()).collect();
+    ids.sort();
+    assert_eq!(ids, ["unam"]);
+}
