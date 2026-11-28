@@ -239,7 +239,7 @@ impl Metadata {
     pub fn from_tables(metadata: &str, strings: &[&str]) -> Metadata {
         let mut keys = HashMap::new();
         for text in strings {
-            for line in text.lines() {
+            for line in parser_rs::lines::lines(&text) {
                 let Some((key, value)) = line.split_once('=') else {
                     continue;
                 };
