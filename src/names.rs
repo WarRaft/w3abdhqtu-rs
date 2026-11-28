@@ -134,7 +134,13 @@ impl ObjectNames {
         for kind in Kind::ALL {
             let Some(text) = read(kind.table_file()) else { continue };
             let table = slk_rs::Table::new(&slk_rs::parse(&text));
-            let column = |n: &str| (1..=table.cols()).find(|&c| table.text(1, c).trim().eq_ignore_ascii_case(n));
+            // The columns by their names (the first of a name), read once:
+            // `cols` goes over every cell.
+            let mut columns: HashMap<String, u32> = HashMap::new();
+            for c in 1..=table.cols() {
+                columns.entry(table.text(1, c).trim().to_ascii_lowercase()).or_insert(c);
+            }
+            let column = |n: &str| columns.get(&n.to_ascii_lowercase()).copied();
             let hero = column("hero");
             let (names, suffix) = kind.name_keys();
             let objects = out.of.entry(kind).or_default();

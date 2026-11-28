@@ -524,8 +524,10 @@ impl Columns {
 /// with `slk-rs`; missing cells are empty.
 fn rows(text: &str) -> Vec<Vec<String>> {
     let table = slk_rs::Table::new(&slk_rs::parse(text));
+    // `cols` goes over every cell: once.
+    let cols = table.cols();
     (1..=table.rows())
-        .map(|r| (1..=table.cols()).map(|c| table.text(r, c)).collect())
+        .map(|r| (1..=cols).map(|c| table.text(r, c)).collect())
         .collect()
 }
 
